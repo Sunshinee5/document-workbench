@@ -392,17 +392,6 @@ export class WorkbenchViewModel {
     }
   }
 
-  /** 把当前页上移 / 下移一位；工具栏按钮走这里。 */
-  async shiftCurrent(delta: -1 | 1): Promise<void> {
-    const from = this.stateValue.currentPage;
-    const to = from + delta;
-    if (to < 1 || to > this.stateValue.pageCount) {
-      return;
-    }
-    await this.movePage(from, to);
-    this.update({ currentPage: to });
-  }
-
   /** 写选择集：Ctrl / Shift / 框选三种模式，真值在后端 Session。 */
   async selectPages(pages: number[], mode: SelectionMode): Promise<void> {
     const id = this.stateValue.activeDocumentId;

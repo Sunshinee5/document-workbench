@@ -172,7 +172,7 @@ export default function App() {
           title="当前页或选中页逆时针旋转 90°"
           onClick={() => void viewModel.rotate(-90)}
         >
-          左转
+          ↺ 90°
         </button>
         <button
           className="tool-button"
@@ -181,25 +181,16 @@ export default function App() {
           title="当前页或选中页顺时针旋转 90°"
           onClick={() => void viewModel.rotate(90)}
         >
-          右转
+          ↻ 90°
         </button>
         <button
           className="tool-button"
           type="button"
           disabled={!hasDocument}
-          title="上移当前页"
-          onClick={() => void viewModel.shiftCurrent(-1)}
+          title="当前页或选中页旋转 180°"
+          onClick={() => void viewModel.rotate(180)}
         >
-          上移
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="下移当前页"
-          onClick={() => void viewModel.shiftCurrent(1)}
-        >
-          下移
+          180°
         </button>
         <button
           className="tool-button danger"

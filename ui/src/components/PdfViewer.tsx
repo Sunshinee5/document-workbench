@@ -183,6 +183,10 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   const [pageCount, setPageCount] = useState(0);
   const [baseSize, setBaseSize] = useState({ width: 595, height: 842 });
   const [loading, setLoading] = useState(false);
+  /** 上次自适应计算出的可用宽度：避免手动缩放被反复覆盖。 */
+  const fittedWidthRef = useRef(0);
+  /** 窗口尺寸变化时递增，触发重新自适应。 */
+  const [resizeTick, setResizeTick] = useState(0);
 
   // 加载文档：拿字节 → PDF.js 解析 → 用第 1 页尺寸作为所有页的基准尺寸。
   useEffect(() => {
@@ -240,6 +244,49 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
 
   // 显示顺序来自后端页布局；旋转 90/270 的页宽高互换。
   const displayOrder = pageOrder.length ? pageOrder : Array.from({ length: pageCount }, (_, i) => i + 1);
+
+  // 打开文档 / 窗口变宽时自动适应宽度：页面铺满可用区域，不留下大片空白。
+  // 同一可用宽度只算一次，避免用户手动缩放后被立刻覆盖。
+  useEffect(() => {
+    if (documentId === null || !pdf || loading) {
+      return;
+    }
+    const container = containerRef.current;
+    if (!container) {
+      return;
+    }
+    const available = container.clientWidth - 48;
+    if (available <= 0 || Math.abs(available - fittedWidthRef.current) < 2) {
+      return;
+    }
+    fittedWidthRef.current = available;
+    const first = displayOrder[0] ?? 1;
+    const sideways = (rotations[first] ?? 0) % 180 !== 0;
+    const basis = sideways ? baseSize.height : baseSize.width;
+    const ratio = available / (basis * BASE_SCALE);
+    onFitZoom(Math.min(8, Math.max(0.1, Number(ratio.toFixed(2)))));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [documentId, pdf, loading, baseSize.width, baseSize.height, resizeTick, onFitZoom]);
+
+  // 窗口尺寸变化 / 页结构变化（旋转会让页宽高互换）时重新自适应。
+  const lastRevisionRef = useRef(layoutRevision);
+  useEffect(() => {
+    if (layoutRevision !== lastRevisionRef.current) {
+      lastRevisionRef.current = layoutRevision;
+      fittedWidthRef.current = 0;
+      setResizeTick((tick) => tick + 1);
+    }
+  }, [layoutRevision]);
+
+  useEffect(() => {
+    const onResize = () => {
+      fittedWidthRef.current = 0;
+      setResizeTick((tick) => tick + 1);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   const pageBoxes = displayOrder.map((original) => {
     const rotation = rotations[original] ?? 0;
     const sideways = rotation % 180 !== 0;
