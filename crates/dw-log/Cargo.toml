@@ -1,0 +1,7 @@
+[package]
+name = "dw-log"
+version.workspace = true
+edition.workspace = true
+description = "文档工作台最小日志设施：分级、按天滚动、保留 7 天；不引入第三方 crate"
+
+[dependencies]

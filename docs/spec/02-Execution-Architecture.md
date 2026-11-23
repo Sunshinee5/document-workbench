@@ -126,9 +126,7 @@ pub trait Command: IExecutable {
 2. 返回 `false` 的命令，`undo()` / `redo()` 实现为 `Ok(())` 并注释「无内容变更，不入 History」；**禁止**把 `undo(open)` 实现成「关闭文档」之类的替代语义。
 3. `CommandKind` 变体与 `records_history()` 返回值必须一一对应，新增变体时同时定返回值。
 
-> **⚠ 已知不一致风险（D3，未解决）**：`submit_all` 无事务语义。第 k 个 Task 失败时，前 k-1 个 Task 已执行并已修改 Document，但按第 4 步「全部成功才写 History」的要求，此时**不写 History**。
-> 后果不是简单的「半执行」，而是**文档已变、历史无记录**：用户无法 Undo，重启后重放也复原不出这个中间态。
-> 在 D3 定案前，实现方**不得**自行选择「失败也写 History」或「失败回滚 Document」其中一种 —— 两种都会制造第二份真值源。可选方向：`submit_all` 加事务语义（失败即整体回滚到执行前 Checkpoint），或改为一 Task 一 Command 记录。**Stage 2 必须定案，否则编辑闭环不成立。**
+> **事务语义已定案（2026-11-23）**：`submit_all()` 具有事务语义，见 §3.6。任一 Task 失败即整条 Command 失败并逆序回滚，History 永不记录半个 Command；不再允许「失败也写 History」或「失败留下部分状态」两种做法。
 
 ---
 
@@ -277,7 +275,31 @@ submit() → capability_gate(ctx, task.required_capability())
 | 2 | `capability_gate(ctx, cap)` | 返回 `TaskRejected`，结束 |
 | 3 | `drivers.resolve(name) → Arc<dyn IDriver>` | 返回 `DwError::Driver`，结束 |
 | 4 | `task.execute_on(ctx, &*driver)` | 归一化为 `DwError`，结束 |
-| 5 | 发布 `TaskCompleted` | 事件失败不影响结果 |
+| 5 | 发布 `TaskFinished` | 事件失败不影响结果 |
+
+### 3.6 Task Transaction（永久冻结，2026-11-23 拍板）
+
+> 这是 `02` D3 的最终裁决。**所有 Feature 直接继承，不得各自重新定义失败策略。**
+
+一条 `Command` 可以生成多个 `Task`；`submit_all()` 具有**事务语义**：
+
+```
+Command → build_tasks() → ExecutionGraph → Transaction
+                                           ├─ 全部 Task 成功 → Commit
+                                           └─ 任一 Task 失败 → Rollback
+```
+
+| 规则 | 内容 |
+|---|---|
+| R1 | 全部 Task 成功 → Command 成功；此时才允许产生 Diff，才允许进入「可写 History」的 Commit 点 |
+| R2 | 任一 Task 失败 → 整个 Command 失败；**不写 History、不保留部分业务状态、不留下孤儿 Diff** |
+| R3 | Rollback 必须逆序补偿已完成的 Task。补偿由 Task / Driver 提供（内存状态可由 `DocumentSnapshot` 统一回滚；涉及文件 / 外部进程的 Driver 必须提供自身补偿） |
+| R4 | History **只记录一个成功完成的 Command**，永远不记录「半个 Command」 |
+| R5 | Commit 是唯一允许写 History 的位置，但 `History.record()` 的具体接入由 Feature-16 实现；Feature-15 只保证 Diff 已生成并随 Commit 保留 |
+| R6 | Task 失败 ≠ History 记录。禁止「先写 History 再执行任务」，也禁止失败后补写「失败记录」 |
+| R7 | `submit_all()` 不做自动重试；重试必须重新走 Command（`00` §3.5） |
+
+ applicability：Merge / Split / OCR / Office / AI 等天然多 Task 的 Command 一律继承本节，不在各自 Feature 里另设事务语义。
 
 ---
 
@@ -500,7 +522,7 @@ Recovery/
 |---|---|---|---|
 | D1 | ~~`Command::params()` 未实现~~ | ✅ **已定案并实现 2026-11-23**（Feature-02）：`fn params(&self) -> serde_json::Value`，不得含引用或句柄 | 已关闭 |
 | D2 | `History.capacity` 数值与淘汰策略 | 容量数值（现为 1000）与淘汰触发时机 | 本文 §6.2 已定语义，数值待定 |
-| D3 | `submit_all` 事务语义（**高风险**） | 第 k 个失败时前 k-1 个已执行，且不写 History ⇒ **文档已变、历史无记录**，用户无法 Undo。见 §1.5 警告块 | Stage 2 必须定案 |
+| D3 | ~~`submit_all` 事务语义（高风险）~~ | ✅ **已定案 2026-11-23**：见 §3.6 Task Transaction。全部成功才 Commit；失败逆序 Rollback；History 永不记录半个 Command | 已关闭 |
 | D4 | `TaskProgress` 载荷 | `Progress` 目前是空结构体，进度载体未定 | Stage 2 定 |
 | D5 | `CancelToken` 语义 | 取消如何传播到 Driver（协作式 / 强杀） | Stage 2 定 |
 | D6 | ~~一条 Command 对应多条 Diff 时如何记录~~ | **已裁定**：`diff_reference` 改为 `Vec<DiffRef>`，按执行顺序 push，重放按 Vec 顺序（§5.3） | 已定 |

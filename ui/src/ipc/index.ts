@@ -163,6 +163,8 @@ export interface PageLayoutInfo {
   rotations: PageRotationInfo[];
   current_page: number;
   selected_pages: number[];
+  /** 本轮生成并暂存的 Diff 数量；History 写入归后续 Feature。 */
+  diff_count: number;
 }
 
 /** 旋转页面：pages 为空时后端退化为当前页。 */

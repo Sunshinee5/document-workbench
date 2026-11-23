@@ -343,7 +343,7 @@ export class WorkbenchViewModel {
       selectedPages: info.selected_pages,
       currentPage: info.current_page,
       layoutRevision: this.stateValue.layoutRevision + 1,
-      status: `页面已更新 · 共 ${info.page_count} 页`,
+      status: `页面已更新 · 共 ${info.page_count} 页 · Diff ${info.diff_count} 条（History 归 16）`,
     });
   }
 

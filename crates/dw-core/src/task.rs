@@ -4,7 +4,7 @@
 
 use crate::capability::{capability_gate, Capability};
 use crate::diff::Diff;
-use crate::document::DocumentState;
+use crate::document::{DocumentSnapshot, DocumentState};
 use crate::driver::{DriverManager, IDriver, PDF_DRIVER, EMPTY_DRIVER};
 use crate::error::{DwError, TaskRejected};
 use crate::eventbus::{Event, EventBus};
@@ -499,11 +499,14 @@ impl TaskManager {
             self.diffs.push(diff);
         }
         // 事件通知：UI 只监听，不直接调用 Task。
-        events.publish(Event::task_completed(task.task_name()));
+        events.publish(Event::task_finished(task.task_name()));
         Ok(())
     }
 
-    /// 提交一批 Task（`Command::build_tasks` 的产物）：逐个走 submit，任一失败即返回错误。
+    /// 提交一批 Task（`Command::build_tasks` 的产物）：**具有事务语义**（`02` §3.6）。
+    ///
+    /// 全部成功 → Diff 保留，调用方进入 Commit；任一失败 → 逆序回滚已完成的 Task、
+    /// 丢弃本轮 Diff、发布 `DriverError`，对外只返回错误。History 永不记录半个 Command。
     pub fn submit_all(
         &mut self,
         tasks: Vec<Box<dyn Task>>,
@@ -511,8 +514,23 @@ impl TaskManager {
         drivers: &DriverManager,
         events: &mut EventBus,
     ) -> Result<(), DwError> {
+        let diff_baseline = self.diffs.len();
+        let mut completed: Vec<DocumentSnapshot> = Vec::new();
+
         for task in tasks {
-            self.submit(task, context, drivers, events)?;
+            let before = context.document.snapshot();
+            match self.submit(task, context, drivers, events) {
+                Ok(()) => completed.push(before),
+                Err(error) => {
+                    // 逆序补偿：后执行的先回滚，避免把文档留在中间态。
+                    for snapshot in completed.iter().rev() {
+                        context.document.restore(snapshot);
+                    }
+                    self.diffs.truncate(diff_baseline);
+                    events.publish(Event::driver_error(&error.to_string()));
+                    return Err(error);
+                }
+            }
         }
         Ok(())
     }

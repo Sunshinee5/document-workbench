@@ -5,7 +5,6 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
 
 use dw_core::action::UserAction;
 use dw_core::capability::{Capability, CapabilitySet, HasCapability};
@@ -15,7 +14,7 @@ use dw_core::document::{Document, DocumentId, DocumentKind};
 use dw_core::driver::DriverManager;
 use dw_core::eventbus::{Event, EventBus};
 use dw_core::lifecycle::IExecutable;
-use dw_core::session::{CommandRecord, SessionManager, SessionState};
+use dw_core::session::{SessionManager, SessionState};
 use dw_core::task::TaskManager;
 use serde::Serialize;
 
@@ -73,14 +72,6 @@ fn session_state_text(state: SessionState) -> &'static str {
     }
 }
 
-/// 当前 Unix 毫秒时间戳：不引入 chrono，取系统时钟失败时退化为 0。
-fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_millis() as u64)
-        .unwrap_or(0)
-}
-
 /// 应用信息：供状态栏展示，证明 IPC 已打通。
 #[derive(Debug, Clone, Serialize)]
 pub struct AppInfo {
@@ -126,7 +117,7 @@ pub fn ping() -> String {
 /// 借用分段（同一对象不可同时可变 + 不可变借用）：
 /// 段1 可变：create_session → active_mut → documents.create → workspace.add_tab
 /// 段2 不可变：active → documents.get → Context → execute → build_tasks → submit_all
-/// 段3 可变：active_mut → history.next_command_id → history.record
+/// 段3 可变：active_mut → 读取会话展示信息（不写 History，History.record 归 16）
 /// 锁顺序固定为 session → task → driver → event，全程一致以避免死锁。
 #[tauri::command]
 pub fn new_session(state: tauri::State<'_, CoreState>) -> Result<SessionInfo, String> {
@@ -197,31 +188,13 @@ pub fn new_session(state: tauri::State<'_, CoreState>) -> Result<SessionInfo, St
         let session = manager
             .active_mut()
             .ok_or_else(|| "会话丢失：没有活动会话".to_string())?;
-        let command_id = session.history.next_command_id();
-        let description = command.description().to_string();
-        session.history.record(CommandRecord {
-            command_id,
-            command_type: command.kind(),
-            params: serde_json::json!({ "description": description }),
-            // 空流程不产 Diff，按 `00` §5 用空 Vec 表示（不是 None）。
-            diff_reference: Vec::new(),
-            timestamp: now_millis(),
-        });
+        // History.record() 归 Feature-16；15 的空流程不写 History（`02` §3.6 R5）。
         // 先结束对 session 的可变借用，再读取 manager 的会话总数。
         let state_text = session_state_text(session.state).to_string();
         let document_count = session.workspace.document_count();
         let session_count = manager.session_count();
         (state_text, document_count, session_count)
     };
-
-    // 6. 事件发布：History 写入完成后由持有 EventBus 的组装层发布（Command 不接触 EventBus）。
-    {
-        let mut events = lock(&state.event_bus);
-        events.publish(Event::new(
-            "HistoryChanged",
-            format!("历史已记录：{}", command.description()),
-        ));
-    }
 
     Ok(SessionInfo {
         state: state_text,
@@ -355,7 +328,7 @@ pub fn open_document(
             .map_err(|error| error.to_string())?;
 
         let info = document_info(document_id, document);
-        events.publish(Event::new("DocumentOpened", format!("已打开：{}", info.title)));
+        events.publish(Event::document_opened(&info.title));
         Ok(info)
     })();
 
@@ -389,6 +362,8 @@ pub fn close_document(
     let id = DocumentId(document_id);
     session.documents.remove(id);
     session.workspace.remove_tab(id);
+    drop(manager);
+    lock(&state.event_bus).publish(Event::document_closed(document_id));
     Ok(())
 }
 
@@ -541,6 +516,8 @@ pub struct PageLayoutInfo {
     pub current_page: u32,
     /// 选中的页位置（Session.selection 真值）。
     pub selected_pages: Vec<u32>,
+    /// 本轮生成并暂存的 Diff 数量（History 归 16，不在此写入）。
+    pub diff_count: usize,
 }
 
 /// 由 Session + Document 组装页布局摘要；ViewModel 只读这份投影。
@@ -564,6 +541,7 @@ fn page_layout_info(
             .collect(),
         current_page: session.workspace.view_state().current_page,
         selected_pages: session.selection.pages().to_vec(),
+        diff_count: 0,
     }
 }
 
@@ -606,7 +584,7 @@ fn run_page_edit<C: Command>(
     let id = DocumentId(document_id);
 
     // 段1（不可变）：组装 Context 并执行完整链路，Diff 随结果一起带出。
-    let (layout, diffs) = (|| -> Result<(PageLayoutInfo, Vec<Diff>), String> {
+    let (layout, diff_count) = (|| -> Result<(PageLayoutInfo, usize), String> {
         let manager = lock(&state.session_manager);
         let session = manager
             .active()
@@ -634,28 +612,27 @@ fn run_page_edit<C: Command>(
         let mut events = lock(&state.event_bus);
         task_manager
             .submit_all(tasks, &context, &drivers, &mut events)
-            .map_err(|error| error.to_string())?;
+            .map_err(|error| {
+                let text = error.to_string();
+                dw_log::error("page-edit", &text);
+                text
+            })?;
         let diffs = task_manager.take_diffs();
-        events.publish(Event::pages_changed(document_id, operation));
-        Ok((page_layout_info(id, session, document), diffs))
+        // 15 的终点：Diff 已生成并暂存，不写 History（`02` §3.6 R5）。
+        // 用内容修订号命名，避免依赖 History.next_command_id()。
+        let diff_count = diffs.len();
+        if !diffs.is_empty() {
+            let _ = persist_diffs(diffs, document.revision());
+        }
+        events.publish(Event::document_modified(document_id, operation));
+        Ok((page_layout_info(id, session, document), diff_count))
     })()?;
 
-    // 段2（可变）：写 History、校正当前页与选择集。
+    // 段2（可变）：校正当前页与选择集；不写 History（归 16）。
     let mut manager = lock(&state.session_manager);
     let session = manager
         .active_mut()
         .ok_or_else(|| "编辑失败：没有活动会话".to_string())?;
-    if command.records_history() {
-        let command_id = session.history.next_command_id();
-        let references = persist_diffs(diffs, command_id);
-        session.history.record(CommandRecord {
-            command_id,
-            command_type: command.kind(),
-            params: command.params(),
-            diff_reference: references,
-            timestamp: now_millis(),
-        });
-    }
     if !removed.is_empty() {
         session.selection.after_delete(removed);
     }
@@ -672,6 +649,7 @@ fn run_page_edit<C: Command>(
     result.page_count = count as usize;
     result.current_page = session.workspace.view_state().current_page;
     result.selected_pages = session.selection.pages().to_vec();
+    result.diff_count = diff_count;
     Ok(result)
 }
 

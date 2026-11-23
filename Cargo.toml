@@ -4,6 +4,7 @@
 resolver = "2"
 members = [
     "crates/dw-core",
+    "crates/dw-log",
     "crates/dw-runtime",
     "crates/dw-pdf",
     "crates/dw-ocr",

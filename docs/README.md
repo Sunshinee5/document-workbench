@@ -20,9 +20,9 @@ docs/
 | 文件 | 内容 | 状态 |
 |------|------|------|
 | `features/14-Feature-01-PDF-Viewer.md` | 打开 PDF → 看第一页 → 滚动 → 缩放 → 跳页 → 多标签 → 最近文件。含 Prerequisite 与 Dependency | ✅ 已实现 2026-11-23 |
-| `features/15-Feature-02-Page-Editing.md` | 旋转 / 删除 / 移动页面、多选、Diff 生成。含 Prerequisite、Dependency 与 **Implementation Order** | 开发中 |
+| `features/15-Feature-02-Page-Editing.md` | 旋转 / 删除 / 移动页面、多选、Diff 生成。含 Prerequisite、Dependency、**Implementation Order** 与 **Failure Policy** | 已实现 2026-11-23（History / Undo 归 16） |
 
-Feature 文档固定七节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
+Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
 ## 六份规范
 

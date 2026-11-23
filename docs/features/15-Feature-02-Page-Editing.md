@@ -19,7 +19,20 @@ Stage：引用 `04` Stage 2（本文件不定义 Stage，见 `00` §0.1）
 | 5 | 新增 `RotationDiff` / `DeletePageDiff` / `MovePageDiff` 三类 Diff | 不新增 `Diff` 变体。三者是 `StructureDiff.payload` 里的**载荷结构**，`operation` 分别为 `RotatePages` / `DeletePages` / `MovePages`；`Diff` 仍只有 `Structure` / `Binary` 两档 | `02` §5.1 / §5.2、`00` §5 |
 | 6 | Driver 新增 `rotate_pages` / `delete_pages` / `move_pages` | 允许作为 `03` §5.5 已有 `rotate_page` / `delete_page` / `reorder_pages` 的**批量形态**实现；单页方法保留，不删规范声明 | `03` §5.5 |
 
-补充裁决：`undo()` / `redo()` 在本章**实现方法签名但语义留空**（返回 `Ok(())`），因为撤销归 Feature-04。本章只负责产出 Diff 并写入 History。编辑只改内存页布局，落盘归 Feature-03（Save）。
+**2026-11-23 追加裁决（优先级高于正文旧表述）**
+
+| # | 事项 | 裁决 |
+|---|---|---|
+| 7 | Undo / Redo | 不进 15。`undo()` / `redo()` 只冻结接口、语义留空；`History.record()` / `Undo()` / `Redo()` 全部由 **16** 实现 |
+| 8 | 15 的终点 | `Command → Task → Driver → Diff`，**到 Diff 结束**；不接 Undo、不写 History |
+| 9 | Save / Save As | **17**。15 只改 Document 内存状态，不保存、不自动保存 |
+| 10 | `close_session` | **17**。它涉及 Workspace / History / Recovery / Checkpoint / RecentFiles，属 Save / Recovery，不属 Page Editing |
+| 11 | 日志设施 | **基础设施，立即做**（`dw_log`，INFO / WARN / ERROR / TRACE），不是 Feature，不引入 ELK 等复杂方案 |
+| 12 | EventBus | **只冻结 6 个事件名**（`01` §6），不实现完整事件系统；16 的 History 直接复用 |
+| 13 | 框选 UI | 推迟。15 只支持 Ctrl / Shift；框选涉及 Viewer / Mouse / Coordinate / HitTest，不属 Rotate |
+| 14 | `submit_all()` | **永久冻结事务语义**（`02` §3.6）：全部成功才 Commit，任一失败逆序 Rollback，不写 History、不留部分状态 |
+
+正文中凡出现「15 写 History」「落入 History」的表述，一律按本表理解为「15 只生成并保留 Diff，History 写入归 16」。
 
 ---
 
@@ -34,14 +47,17 @@ Stage：引用 `04` Stage 2（本文件不定义 Stage，见 `00` §0.1）
 1. Rotate：顺时针 90° / 180° / 270°，作用于当前页与多选页
 2. Delete：删除当前页或多页，**至少保留一页**
 3. Move：第一页 → 第三页、第五页 → 第一页；拖拽排序 UI 可后补，Driver 必须支持
-4. Multi Selection：Ctrl 点选、Shift 连选、框选；选择集存在 Session，Document 不保存
+4. Multi Selection：Ctrl 点选、Shift 连选；**框选推迟**。选择集存在 Session，Document 不保存
 
 **不包括**
 
 | 不做什么 | 归哪个 Feature |
 |---|---|
 | Undo / Redo | Feature-04 |
-| Save / Save As | Feature-03（本章只改内存布局） |
+| Save / Save As | **17**（本章只改内存布局，不保存、不自动保存） |
+| Undo / Redo | **16**（本章只冻结接口与 Diff） |
+| `close_session` | **17**（Workspace / History / Recovery / Checkpoint / RecentFiles） |
+| 框选多页 | 后续（涉及 Viewer / Mouse / Coordinate / HitTest） |
 | OCR | Feature-06 |
 | 注释 / 文本编辑 / 图片编辑 | 后续 Feature |
 | InsertPage（空白页） | 后续 Feature（MVP 后置） |
@@ -99,7 +115,9 @@ Gate 只看 Document 在 `create()` 时声明的 `Capability::Edit`，不看运�
 | Delete | `DeletePages` | `DeletePageDiff { pages }` |
 | Move | `MovePages` | `MovePageDiff { from, to }` |
 
-Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager → Command 写 History（`command_id` 前缀 + 序号落盘到 `Recovery/session-<id>/diffs/`）。
+Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager → **Commit 点保留 Diff**。
+
+15 的终点就是这里：**不调用 `History.record()`，不写 `CommandRecord`，不做撤销**。Diff 实体按内容修订号 + 序号暂存于 `Recovery/diffs/`（不依赖 `History.next_command_id()`）；把它接进 History 是 16 的事（`02` §3.6 R5）。
 
 ### 3.7 Workspace / UI 刷新
 
@@ -107,7 +125,7 @@ Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager �
 |---|---|---|
 | CurrentPage | `Workspace.view_state.current_page` | 删页导致当前页越界时夹到合法范围 |
 | PageCount | `Document.page_count()`（派生） | 由 Driver 改页布局后自然变化，不复制进 Workspace |
-| Selection | `Session.selection` | Ctrl / Shift / 框选写入；编辑后清掉已失效页码 |
+| Selection | `Session.selection` | Ctrl / Shift 写入；编辑后清掉已失效页码（框选推迟） |
 | Thumbnail | UI 投影 | 收到 `PagesChanged` 事件后重渲染，不进 Workspace |
 
 ### 3.8 IPC
@@ -123,8 +141,8 @@ Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager �
 | 3 | 删除首页 / 末页 / 连续多页，页序连续且页数正确 |
 | 4 | 删除全部页被拒绝，至少保留 1 页 |
 | 5 | 首页 → 末页、末页 → 首页、连续移动，页序正确 |
-| 6 | Ctrl / Shift / 框选产生正确页码集合，Document 内无 Selection 字段 |
-| 7 | 每次编辑产生且仅产生 1 条对应 `StructureDiff`，落入 History |
+| 6 | Ctrl / Shift 产生正确页码集合，Document 内无 Selection 字段 |
+| 7 | 每次编辑产生且仅产生 1 条对应 `StructureDiff`，Commit 后保留；15 不写 History |
 | 8 | 缺 `Edit` 声明的文档执行编辑只返回 `TaskRejected` |
 | 9 | `Command::params()` 输出可 JSON 表达，不含引用或句柄 |
 
@@ -159,7 +177,7 @@ Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager �
 ```
 ✓ 页面编辑能力    Rotate / Delete / Move
 ✓ Diff 数据       RotationDiff / DeletePageDiff / MovePageDiff
-✓ History 输入    每条编辑 Command 一条记录 + Diff 引用
+✓ Diff 数据       RotationDiff / DeletePageDiff / MovePageDiff（16 接进 History）
 ✓ Save 输入       Document 内存页布局（Feature-03 落盘）
 ✓ 选择集模型      Session.selection 的页范围实现
 ```
@@ -184,5 +202,21 @@ Task 构造 Diff → `Document.mutate()` 改状态 → Task 交回 TaskManager �
 | 11 | Move Command | `MovePagesCommand` + `MovePage` 枚举项 | `params()` 正确 |
 | 12 | Move Task | `MovePagesTask` + `MovePageDiff` | 产出 1 条 Diff |
 | 13 | Move IPC | `move_pages` | 页序同步 |
-| 14 | Thumbnail Refresh + Multi Selection | 缩略图投影刷新、Ctrl / Shift / 框选 | 编辑后缩略图与页码一致 |
+| 14 | Thumbnail Refresh + Multi Selection | 缩略图投影刷新、Ctrl / Shift 多选（框选推迟） | 编辑后缩略图与页码一致 |
 | 15 | Integration Test | 整链测试 + 绿色版实测截图 | 全部测试通过、截图归档 |
+
+## 八、Failure Policy
+
+从本 Feature 起固定此章节；本节与 `02` §3.6 Task Transaction 冲突时以 `02` 为准。
+
+| 失败类型 | 处理 |
+|---|---|
+| **Capability 失败** | Gate 在 Task 创建前拒绝；对外只抛 `TaskRejected`，不降级执行、不尝试其他 Driver。Document 未改动，无 Diff，无 History |
+| **Driver 失败** | `DriverError` 归一化为 `DwError::Driver` 向上抛；**不自动重试**（`02` §3.5）。`dw_log::error` 记录驱动名与原因，UI 状态栏显示中文错误 |
+| **Task 失败** | 本条 Command 事务失败：`submit_all()` 逆序回滚已完成的 Task（还原 `DocumentSnapshot`），丢弃本轮全部 Diff。**Task 失败绝不写 History**（`02` §3.6 R6） |
+| **Transaction 失败** | Commit 不发生；不产生 `CommandRecord`、不发布 `DocumentModified`；只发布 `DriverError` 事件供 UI 刷新。用户可重新触发同一 Command，重试不产生「半条」历史 |
+| **删页越界 / 全删** | 属 Driver 参数校验失败，走 Driver 失败路径；错误文案「至少要保留一页，不能删除全部页面」 |
+| **移动位置越界** | 同上；位置必须在 `[1, page_count]` |
+| **选择集失效** | 删页后由 `Selection::after_delete()` 重编号；不把无效页码写回后端 |
+
+15 的成功终点：**Commit 后 Diff 已生成并保留**。`History.record()` 在 16 接入，不得在 15 提前调用。

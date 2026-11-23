@@ -375,16 +375,19 @@ document.mutate(|inner| inner.revision += 1);
 
 | 事件 | 发送方 | 时机 |
 |---|---|---|
-| `TaskStarted` | `TaskManager` | Task 开始执行 |
-| `TaskProgress` | `TaskManager` | 进度更新（`Progress` 变化） |
-| `TaskCompleted` | `TaskManager` | Task 成功结束 |
-| `CommandExecuted` | 持有 EventBus 的组装层 | Command 执行完成 |
-| `DocumentChanged` | 持有 EventBus 的组装层 | `Document.mutate()` 之后 |
-| `HistoryChanged` | 持有 EventBus 的组装层 | History 写入或游标变化后 |
+| `DocumentOpened` | 持有 EventBus 的组装层 | 打开文档并进入 `Ready` 后 |
+| `DocumentClosed` | 持有 EventBus 的组装层 | 关闭文档、移除页签后 |
+| `DocumentModified` | 持有 EventBus 的组装层 | 编辑 Command Commit 之后（不是每次 `mutate`） |
+| `WorkspaceChanged` | 持有 EventBus 的组装层 | 当前页 / 缩放 / 滚动 / 活动文档变化后 |
+| `TaskFinished` | `TaskManager` | Task 成功结束；失败发 `DriverError`，不发本事件 |
+| `DriverError` | `TaskManager` / 组装层 | Driver 返回归一化错误时 |
+
+> 2026-11-23 裁决：这 6 个事件名**永久冻结**，取代原先的 `TaskStarted` / `TaskProgress` / `TaskCompleted` / `CommandExecuted` / `DocumentChanged` / `HistoryChanged`。后续 Feature 直接复用，不另造事件名。
 
 4. `Command` 与 `Document` **不知道 EventBus 存在**（`00` §5.8）；事件只能由持有方发布。
 5. 事件载荷只放可 JSON 表达的数据，不放 `&Document` 之类引用。
-6. 订阅方：UI / ViewModel 订阅全部 6 类事件用于刷新；**禁止**用事件做控制流（事件回调里不得调 Task / Driver / Runtime，也不得触发 Command）。
+6. 订阅方：UI / ViewModel 订阅事件用于刷新；**禁止**用事件做控制流（事件回调里不得调 Task / Driver / Runtime，也不得触发 Command）。
+7. **本阶段只冻结事件名，不实现完整事件系统**：`EventBus` 保持最小实现（队列 + `publish` / `events` / `last_event`），不做订阅注册、不做异步分发、不做持久化。Feature-16 的 History 直接复用上述事件名即可。
 
 ---
 

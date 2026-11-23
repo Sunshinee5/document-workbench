@@ -114,13 +114,13 @@ Preview v0.1、可运行绿色版、具备日常阅读能力。
 
 1. **S1-5 级联清理 Diff** —— `History::record()` 的容量淘汰（`drain`）与 redo 截断（`truncate`）两处都只丢 `CommandRecord`、不删磁盘 Diff 文件。规范要求级联删除。注意：`diff_reference` 改为 `Vec` 后，一条 Command 可能挂 N 个 Diff，孤儿会成倍增长。**这是正确性缺口，不是优化项。**
 2. **S1-2 `Command::params()` 访问器** —— 现有 `CommandRecord.params` 只能塞中文描述，History 无法重放。**同一问题见 `02` D1，设计定案以 `02` 为准。** — ✅ **已完成 2026-11-23**（Feature-02：`Command::params() -> serde_json::Value`，全部具体 Command 显式实现）
-3. **S1-3 `Diff` 生成链路** —— `Diff` 目前零构造，`Document.mutate()` 不产 Diff。按 00 §5，由 Task 构造 Diff。 — ✅ **已完成 2026-11-23**（Feature-02：`RotationDiff` / `DeletePageDiff` / `MovePageDiff` 载荷 + `Diff::rotation/delete_page/move_page` 构造口；Task 产出、TaskManager 收口、IPC 落盘并写 `CommandRecord.diff_reference`）
+3. **S1-3 `Diff` 生成链路** —— `Diff` 目前零构造，`Document.mutate()` 不产 Diff。按 00 §5，由 Task 构造 Diff。 — ✅ **已完成 2026-11-23**（Feature-02：`RotationDiff` / `DeletePageDiff` / `MovePageDiff` 载荷 + `Diff::rotation/delete_page/move_page` 构造口；Task 产出、TaskManager 收口、Diff 落盘暂存。**`History.record()` 归 16，15 不写 `CommandRecord`**）
 4. **E10 `DriverManager::names()`** —— 缺此方法则「配置指向不存在的 Driver 要报错不回退」这条规则无法实现。**裁定 C 把「配置校验」明确划给启动期 `names()`，本条因此成为 Stage 2 的硬前置。** — ✅ **已完成 2026-11-23**（`DriverRegistry::names()` / `DriverManager::names()`，另有 `driver_names` IPC 供诊断）
-5. **S1-1 `close_session` 接入** —— 避免标签页反复开关导致 Session 堆积。 — ⬜ 未做（当前单会话，`close_document` 只移除 Document）
+5. **S1-1 `close_session` 接入** —— 避免标签页反复开关导致 Session 堆积。 — ⬜ **归 Feature-17（Save / Recovery）**：它涉及 Workspace / History / Recovery / Checkpoint / RecentFiles，不属于 Page Editing；当前单会话，`close_document` 只移除 Document
 6. **`ViewState` 落地** —— 01 §2.3 定义了四字段（含 `active_document_id`），代码里还没有。 — ✅ **已完成 2026-11-23**（`workspace.rs`：`ViewState` + `Workspace.view_state`，另有 `set_view_state` IPC 写回）
-7. **EventBus 补齐事件** —— 目前只有 `TaskCompleted`，需补 01 §6 定义的 6 类。 — ⬜ 未做（新增 `DocumentOpened` 为临时补充，6 类正式事件未齐）
+7. **EventBus 事件** — ✅ **已冻结 2026-11-23**（`01` §6）：`DocumentOpened` / `DocumentClosed` / `DocumentModified` / `WorkspaceChanged` / `TaskFinished` / `DriverError`。**只冻结名字，不实现完整事件系统**；`EventBus` 保持队列 + publish/query 最小实现，16 的 History 直接复用
 8. **前端引入 PDF.js** —— 确定 Worker 与 cmaps/标准字体的打包方式（**注意：PDF.js 的 cmaps 与标准字体有数 MB，中文 PDF 缺了会乱码，需确认绿色版体积影响与离线可用性**）。 — ✅ **已完成 2026-11-23**：Worker 由 Vite 打包（`pdf.worker.min-*.mjs`，约 1.27 MB）；cmaps（169 个 `.bcmap`，1.5 MB）与标准字体（16 个，0.8 MB）放在 `ui/public/pdfjs/`，由 `PdfViewer` 通过 `cMapUrl` / `standardFontDataUrl` 加载，随 `custom-protocol` 一并编进 exe。**实测**：STSong-Light（未嵌入字形的 Adobe-GB1 CID 字体）中文样本渲染正常，绿色版总重 25 MB（exe 24 MB + WebView2Loader 0.16 MB）
-9. **最小日志设施** —— 项目目前没有任何运行期日志：`lib.rs` 的 `startup.log` 是裸 `OpenOptions` 写入，只在启动时写一行；运行期（打开失败、渲染失败、Driver 报错）完全不可观测。Stage 2 引入 PDF.js 后必须能定位问题。**不引入第三方 crate**（`00` §10 技术栈冻结清单里没有日志库），用 `std::fs` + 分级封装（Error / Warn / Info / Debug）输出到 `logs/`，按天滚动，保留最近 7 天。 — ⬜ 未做
+9. **最小日志设施** —— ✅ **已完成 2026-11-23（基础设施，不是 Feature）**：新增 `crates/dw-log`，四档 `INFO / WARN / ERROR / TRACE`，输出到 `logs/YYYY-MM-DD.log`，按天滚动、保留 7 天；零第三方依赖。`dw-desktop` 的启动日志与页编辑失败日志已接入，禁止再直接 `OpenOptions` 另写一套。
 
 **Feature-01 落地时新增、需登记的前置项**
 

@@ -269,6 +269,11 @@ impl Document {
         self.read(|inner| inner.state)
     }
 
+    /// 内容修订号：页结构写回时递增，供 Diff 命名与事务快照比较使用。
+    pub fn revision(&self) -> u64 {
+        self.read(|inner| inner.revision)
+    }
+
     /// 推进状态机：唯一写入口是 `mutate()`。
     pub fn set_state(&self, state: DocumentState) {
         self.mutate(|inner| inner.state = state);
@@ -331,6 +336,44 @@ impl Document {
     /// 若走写回口会让刚打开的文档立刻显示「已修改」。
     pub fn initialize_page_layout(&self, pages: PageLayout) {
         self.mutate(|inner| inner.pages = pages);
+    }
+}
+
+/// 文档状态快照：`submit_all()` 事务回滚用的补偿数据。
+///
+/// 它只覆盖 Document 的内存状态（元数据 / 状态 / 修订号 / 页布局）。
+/// 涉及文件与外部进程的 Driver 仍需各自提供补偿，见 `02` §3.6 R3。
+#[derive(Debug, Clone)]
+pub struct DocumentSnapshot {
+    /// 内容修订号。
+    pub revision: u64,
+    /// 文档状态。
+    pub state: DocumentState,
+    /// 元数据快照。
+    pub metadata: DocumentMetadata,
+    /// 页布局快照。
+    pub pages: PageLayout,
+}
+
+impl Document {
+    /// 捕获当前文档状态：Task 执行前由 TaskManager 调用。
+    pub fn snapshot(&self) -> DocumentSnapshot {
+        self.read(|inner| DocumentSnapshot {
+            revision: inner.revision,
+            state: inner.state,
+            metadata: inner.metadata.clone(),
+            pages: inner.pages.clone(),
+        })
+    }
+
+    /// 恢复快照：事务失败时逆序回滚已完成的 Task。
+    pub fn restore(&self, snapshot: &DocumentSnapshot) {
+        self.mutate(|inner| {
+            inner.revision = snapshot.revision;
+            inner.state = snapshot.state;
+            inner.metadata = snapshot.metadata.clone();
+            inner.pages = snapshot.pages.clone();
+        });
     }
 }
 

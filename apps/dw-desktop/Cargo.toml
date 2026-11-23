@@ -12,6 +12,7 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dw-core = { path = "../../crates/dw-core" }
+dw-log = { path = "../../crates/dw-log" }
 dw-runtime = { path = "../../crates/dw-runtime" }
 dw-pdf = { path = "../../crates/dw-pdf" }
 tauri-plugin-dialog = "2"

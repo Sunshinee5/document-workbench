@@ -3,8 +3,7 @@
 
 pub mod ipc;
 
-use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::fs;
 use std::path::PathBuf;
 
 use dw_runtime::RuntimeDirectories;
@@ -69,16 +68,14 @@ fn initialize_environment() {
         })
         .unwrap_or_else(|| "文档工作台".to_string());
 
-    if let Ok(mut log) = OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(directories.logs.join("startup.log"))
-    {
-        let _ = writeln!(
-            log,
+    // 统一走 dw_log，禁止再直接 OpenOptions 另写一套日志。
+    dw_log::init(&root);
+    dw_log::info(
+        "startup",
+        &format!(
             "文档工作台启动：配置={}，标题={}",
             config_path.display(),
             title
-        );
-    }
+        ),
+    );
 }

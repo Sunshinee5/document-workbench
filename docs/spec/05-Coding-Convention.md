@@ -378,7 +378,7 @@ Feature 文档**不是规范**，但它的结构必须固定，否则 Agent 每�
 
 ### 8.1 固定结构
 
-每份 Feature 文档按此顺序，**七节缺一不可**（`15` 起新增第七节，见 §8.5）：
+每份 Feature 文档按此顺序，**八节缺一不可**（`15` 起新增第七、八节，见 §8.5 / §8.6）：
 
 ```
 一、目标          这个 Feature 让用户能做什么（可验收的一句话）
@@ -388,6 +388,7 @@ Feature 文档**不是规范**，但它的结构必须固定，否则 Agent 每�
 五、Prerequisite  开工前必须先补完的基础项（见 8.2）
 六、Dependency    依赖什么 / 交付什么（见 8.3）
 七、Implementation Order  固定实现顺序，Agent 不自行推导（见 8.5）
+八、Failure Policy        固定失败处理方式，Agent 不自行决定（见 8.6）
 ```
 
 ### 8.2 `Prerequisite`：不是我的 bug，是基础没补
@@ -446,6 +447,19 @@ Provides（本 Feature 完成后可供后续引用）
 3. 默认粒度：**Driver → Command → Task → IPC → UI**，一个操作一组；全部操作完成后再做 Thumbnail / 集成测试与截图。Feature 文档可以按能力性质细分，但编号必须从 Step 1 连续递增。
 4. 一个 Step 一个 PR；PR 标题带 `Step N`，并引用 Feature 文档与本节。
 5. 本节解决的是「Agent 每次都要重新决定先写什么」的问题，与 `guides/` 的周粒度排期无关：Guide 没有规范权，本节是 Feature 文档的一部分，随 Feature 一起生效。
+
+### 8.6 Failure Policy（自 `15` 起强制）
+
+每份 Feature 文档必须有一节 `Failure Policy`，至少逐项规定：
+
+| 失败类型 | 必须写清 |
+|---|---|
+| Capability 失败 | Gate 拒绝后对外抛什么；是否允许降级执行 |
+| Driver 失败 | 错误归一化路径；是否重试（默认不重试，`02` §3.5） |
+| Task 失败 | 事务如何 Rollback；**Task 失败绝不写 History**（`02` §3.6 R6） |
+| Transaction 失败 | 已完成的 Task 如何逆序补偿；Diff 如何丢弃；UI 收到什么错误 |
+
+本节与 `02` §3.6 Task Transaction 冲突时，以 `02` 为准。Feature 只能补充本 Feature 特有的失败场景，不得削弱事务原子性。
 
 ---
 

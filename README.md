@@ -18,11 +18,13 @@ Windows 本地绿色版文档工作台。React + TypeScript + Tauri 2 + Rust Car
 | **PDF 阅读（Feature-01）** | 用 PDF.js 在 WebView 内渲染：连续滚动、IntersectionObserver 懒渲染、缩放、适应宽度、跳页、多标签、最近文件；不产生跨 IPC 位图 | [打开截图](docs/features/14-screenshots/01-open.png) · [200% 缩放](docs/features/14-screenshots/02-zoom-200.png) · [翻页](docs/features/14-screenshots/03-page2.png) |
 | **中文离线渲染** | 随包携带 169 个 CMap + 16 个标准字体，未嵌入字形的 Adobe-GB1 CID 字体也能正确显示；实测 STSong-Light 样本无乱码 | `ui/public/pdfjs/` |
 | **页面编辑（Feature-02）** | 旋转 90°/180°/270°、删除页（至少保留一页）、移动页、缩略图拖拽排序、Ctrl/Shift 多选批量编辑 | [旋转](docs/features/15-screenshots/02-rotate-90.png) · [删页](docs/features/15-screenshots/03-delete.png) · [拒绝全删](docs/features/15-screenshots/04-refuse-all-delete.png) · [移动](docs/features/15-screenshots/05-move.png) · [多选](docs/features/15-screenshots/06-multi-select.png) |
-| **Diff 链路** | Task 产出 `RotationDiff` / `DeletePageDiff` / `MovePageDiff`，TaskManager 收口，落盘到 `Recovery/diffs/` 并写入 `CommandRecord.diff_reference` | `crates/dw-core/src/diff.rs` |
+| **Diff 链路** | Task 产出 `RotationDiff` / `DeletePageDiff` / `MovePageDiff`，TaskManager 收口，落盘到 `Recovery/diffs/` 暂存；**15 不写 History，写入归 16** | `crates/dw-core/src/diff.rs` |
+| **Task 事务** | `submit_all()` 全部成功才 Commit；任一失败逆序回滚已完成 Task、丢弃 Diff、不写 History（`02` §3.6） | `crates/dw-core/src/task.rs` |
+| **最小日志设施** | `dw_log`：INFO / WARN / ERROR / TRACE 四档，按天滚动、保留 7 天，零第三方依赖 | `crates/dw-log/` |
 | **能力门禁** | 全链路唯一准入点；只检查 `create()` 时声明的 `Capability`，失败对外只抛 `TaskRejected` | `crates/dw-core/src/capability.rs` |
 | **绿色版打包** | `scripts/package.sh` 前端先构建、Rust 后编译，末尾自检 exe 确实内嵌当前前端；产物约 25 MB | `dist/DocumentWorkbench/`（不入库） |
 
-验证状态：**26 个测试全部通过**，`npx tsc --noEmit` 通过，打包自检通过，绿色版异地复制后可直接启动。
+验证状态：**29 个测试全部通过**，`npx tsc --noEmit` 通过，打包自检通过，绿色版异地复制后可直接启动。
 
 详细实现记录：[Feature-01](docs/records/Feature-01-实现记录.md) · [Feature-02](docs/records/Feature-02-实现记录.md)
 
@@ -34,17 +36,17 @@ Windows 本地绿色版文档工作台。React + TypeScript + Tauri 2 + Rust Car
 
 | 功能 | 当前状态 | 归到哪里 |
 |---|---|---|
-| **Undo / Redo** | Diff 已写入 History，但 `Command::undo()` / `redo()` 仍返回 `Ok(())`，用户撤不回来 | 后续 Feature（`docs/spec/02` §撤销） |
-| **Save / Save As** | 编辑只改内存页布局，关掉软件即丢失；需要把页序/旋转写回 PDF 文件 | 后续 Feature |
+| **Undo / Redo** | Diff 已生成并暂存，接口已冻结；`History.record()` / `undo()` / `redo()` 尚未接入，用户撤不回来 | **16** |
+| **Save / Save As** | 编辑只改内存页布局，不保存也不自动保存，关掉软件即丢失 | **17** |
 | **插入空白页** | 文档 15 标记为 MVP 后置 | 后续 Feature |
 | **搜索与高亮 / 真实缩略图 / 深色模式** | Feature-01 范围外 | 后续 Feature |
 | **框选多页** | Ctrl / Shift 已支持，后端 `replace` 模式已备好；框选 UI 未做 | 后续 Feature |
 | **OCR** | `dw-ocr` 仍是骨架（`WindowsOcr` / `Tesseract` / `PaddleOCR` 占位） | Stage 4 |
 | **Office 互转** | `dw-office` 仍是骨架（LibreOffice / ONLYOFFICE 占位） | Stage 4 |
-| **最小日志设施** | 只有启动写一行 `startup.log`，运行期错误不可追溯；禁止第三方日志 crate | Stage 2 收口前 |
-| **`close_session` 接入** | 标签反复开关导致 Session 堆积 | Stage 2 收口前 |
-| **EventBus 正式 6 类事件** | 目前只有 `TaskCompleted` / `DocumentOpened` / `PagesChanged` | Stage 2 收口前 |
-| **`submit_all` 事务语义（`02` D3，高风险）** | 多 Task Command 中途失败时「文档已变、历史无记录」；当前每条编辑 Command 只有 1 个 Task，暂不触发，但必须定案 | 必须定案 |
+
+| **`close_session` 接入** | 标签反复开关导致 Session 堆积；涉及 Workspace / History / Recovery / Checkpoint / RecentFiles | **17**（Save / Recovery） |
+| **EventBus 完整系统** | 6 个事件名已冻结（`DocumentOpened` / `DocumentClosed` / `DocumentModified` / `WorkspaceChanged` / `TaskFinished` / `DriverError`），当前只做最小队列实现 | 16 直接复用，不另造事件名 |
+
 
 ---
 
@@ -83,6 +85,7 @@ Command → build_tasks() → Capability Gate → ExecutionGraph
 
 ```
 crates/dw-core      核心类型与 trait（依赖仅 serde / serde_json）
+crates/dw-log       最小日志设施（四档分级 / 按天滚动 / 保留 7 天）
 crates/dw-runtime   绿色版目录环境与第三方接入点，不放业务
 crates/dw-pdf       PdfDriver：元数据读取 + 页编辑（lopdf）
 crates/dw-ocr       OCR Driver 骨架

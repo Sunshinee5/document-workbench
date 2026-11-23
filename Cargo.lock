@@ -779,6 +779,7 @@ name = "dw-desktop"
 version = "0.1.0"
 dependencies = [
  "dw-core",
+ "dw-log",
  "dw-pdf",
  "dw-runtime",
  "serde",
@@ -787,6 +788,10 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
 ]
+
+[[package]]
+name = "dw-log"
+version = "0.1.0"
 
 [[package]]
 name = "dw-ocr"

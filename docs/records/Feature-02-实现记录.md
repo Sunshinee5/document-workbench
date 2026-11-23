@@ -9,7 +9,7 @@
 
 ## 一、结论
 
-Feature-02 的 15 步 Implementation Order 全部完成。**第一次真正修改了 PDF 的页结构**，并且 Diff 第一次落到了 History。
+Feature-02 的 15 步 Implementation Order 全部完成。**第一次真正修改了 PDF 的页结构**，并且 Diff 第一次真正生成。**History 写入不在本章，归 16。**
 
 用户原稿与冻结规范有 6 处冲突，已逐条裁决写进 `15` 的「裁决」段，不另起炉灶：
 
@@ -22,7 +22,7 @@ Feature-02 的 15 步 Implementation Order 全部完成。**第一次真正修�
 | 新 Driver 方法 | `rotate_pages` / `delete_pages` / `move_pages` 作为 `03` §5.5 已有方法的批量形态 |
 | 链路写法 | 统一为 `Command → build_tasks() → Capability Gate → ExecutionGraph` |
 
-`undo()` / `redo()` 本章只留签名与 `Ok(())`，撤销语义归后续 Feature；编辑只改内存页布局，落盘归 Save。
+`undo()` / `redo()` 本章只留签名与 `Ok(())`，撤销语义归 16；`History.record()` 亦归 16。Save / Save As 归 17，`close_session` 归 17，日志设施作为基础设施立即做，EventBus 只冻结 6 个事件名，框选 UI 推迟。
 
 ---
 
@@ -44,9 +44,9 @@ Feature-02 的 15 步 Implementation Order 全部完成。**第一次真正修�
 | 12 | Move Task | `MovePagesTask` + `MovePageDiff` |
 | 13 | Move IPC | `move_pages` |
 | 14 | Thumbnail Refresh + Multi Selection | 缩略图列表（拖拽排序）+ Ctrl / Shift 多选；`Session.selection` 增 `toggle` / `extend_to` / `after_delete`；`Event::pages_changed` |
-| 15 | Integration Test | `crates/dw-pdf/tests/page_edit_flow.rs` + 绿色版实测截图 |
+| 15 | Integration Test | `crates/dw-pdf/tests/page_edit_flow.rs`（含事务回滚用例）+ 绿色版实测截图 |
 
-**顺手补掉的前置项**
+**顺手补掉的前置项与冻结项**
 
 - S1-2 `Command::params()`（`02` D1）：trait 增默认实现，全部具体 Command 显式实现，D1 关闭。
 - S1-3 Diff 生成链路（`02` §5.2）：`Diff::rotation/delete_page/move_page` 构造口；Task 产 Diff、`TaskManager::take_diffs()` 收口、IPC 落盘 `Recovery/diffs/cmdNNN-1` 并写 `CommandRecord.diff_reference`。
@@ -57,13 +57,14 @@ Feature-02 的 15 步 Implementation Order 全部完成。**第一次真正修�
 
 ## 三、验证
 
-### 测试：26 个全过
+### 测试：29 个全过
 
 ```
 dw-core            8 passed   （含 Selection 的 Ctrl/Shift/删页重编号）
 dw-pdf unit        9 passed   （含 1/100/1000 页旋转、首末删页、禁止全删、首末移动、旋转跟随页移动）
 open_flow          3 passed
-page_edit_flow     4 passed   （整链 × 3 + Gate 拒绝）
+page_edit_flow     5 passed   （整链 × 3 + Gate 拒绝 + 事务回滚）
+dw-log unit        2 passed
 real_pdf           2 passed
 ```
 
@@ -94,16 +95,14 @@ bash scripts/package.sh                # 通过，自检 exe 内嵌当前前端
 
 | # | 欠什么 | 影响 | 归属 |
 |---|---|---|---|
-| 1 | Undo / Redo | Diff 已写入 History，但 `undo()` 仍是空实现，用户撤不回来 | 后续 Feature |
-| 2 | Save / Save As | 编辑只改内存布局，关掉软件即丢失 | 后续 Feature |
-| 3 | `close_session` 接入 | 标签反复开关导致 Session 堆积 | Stage 2 收口前 |
-| 4 | 最小日志设施 | 运行期错误只能显示在状态栏，不可追溯 | Stage 2 收口前 |
-| 5 | EventBus 正式 6 事件 | 目前 `TaskCompleted` / `DocumentOpened` / `PagesChanged` 三个 | Stage 2 收口前 |
-| 6 | 框选（框架拖拽选多页） | 目前支持 Ctrl / Shift，框选 UI 未做；后端 `replace` 模式已备好 | 后续 Feature |
-| 7 | `02` D3 `submit_all` 事务语义 | 多 Task Command 中途失败时「文档已变、历史无记录」；本 Feature 每条 Command 只有 1 个 Task，暂不触发，但风险仍在 | 必须定案 |
+| 1 | Undo / Redo + `History.record()` | Diff 已生成并暂存，接口已冻结；历史写入与撤销均未接入 | **16** |
+| 2 | Save / Save As | 编辑只改内存布局，不保存、不自动保存 | **17** |
+| 3 | `close_session` 接入 | 标签反复开关导致 Session 堆积；涉及 Workspace / History / Recovery / Checkpoint / RecentFiles | **17** |
+| 4 | 框选（框架拖拽选多页） | 只支持 Ctrl / Shift；框选涉及 Viewer / Mouse / Coordinate / HitTest | 后续 Feature |
+| 5 | EventBus 完整系统 | 6 个事件名已冻结，当前只做最小队列实现 | 16 直接复用 |
 
 ---
 
 ## 五、一句话
 
-15 步全部按 Feature 文档顺序提交，没有自行推导开发顺序；Capability Gate 只看 `create()` 时的 `Edit` 声明，Task 只转参数，Driver 只改页布局，Diff 由 Task 产出并首次真正进入 History。
+15 步全部按 Feature 文档顺序提交，没有自行推导开发顺序；Capability Gate 只看 `create()` 时的 `Edit` 声明，Task 只转参数，Driver 只改页布局，Diff 由 Task 产出并在 Commit 点保留。**History 与 Undo 留给 16，Save 与 close_session 留给 17，事务原子性已在本次冻结并实现。**

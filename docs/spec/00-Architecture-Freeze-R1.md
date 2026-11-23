@@ -46,7 +46,7 @@
 3. `06`+ 的文档**不是规范**，不进规范集，不具规范权：它们只描述「怎么实现」与「按什么顺序做」。从中推导出的任何架构结论均无效，必须回到 `00`~`05` 找依据。
 4. `13`+ 的定位是 **Guide（指南）而非 Spec（规范）**：只回答「这一周写什么、下一步写哪个文件」，不回答「能不能这么设计」。Guide 与 `00`~`05` 冲突时，无条件以 `00`~`05` 为准，且 Guide 必须被回改。
 5. 任何文档新增或修改概念前，必须先过 `05` 附录 A《Architecture Compatibility Checklist》；任一项为 Yes 即须 Architecture Review，否则不得 Merge。
-6. **Feature 文档结构固定**：`06`~`12` **必须**含 `Prerequisite`（开工前必须补完的基础项）与 `Dependency`（`Requires` 依赖什么、`Provides` 交付什么）；自 `15` 起**还必须含最后一节 `Implementation Order`**（固定 Step 表，Agent 不自行推导开发顺序）。下一个 Feature 直接引用上一个的 `Provides`，禁止重复描述已完成能力。格式见 `05` §8（含 §8.5）。
+6. **Feature 文档结构固定**：`06`~`12` **必须**含 `Prerequisite`（开工前必须补完的基础项）与 `Dependency`（`Requires` 依赖什么、`Provides` 交付什么）；自 `15` 起**还必须含 `Implementation Order`（固定 Step 表）与 `Failure Policy`（固定失败处理）两节，Agent 不自行推导顺序或失败策略**。下一个 Feature 直接引用上一个的 `Provides`，禁止重复描述已完成能力。格式见 `05` §8（含 §8.5 / §8.6）。
 
 **阅读导航（Agent 按问题定位，不要通读全部）**
 
@@ -177,6 +177,8 @@ Command → Diff → Checkpoint
 | `Command` | **唯一语义真值源** | 记录「做了什么、如何撤销」，Undo / Redo 由 Command 负责 |
 | `Diff` | **回放依据** | 分两档：`StructureDiff`（JSON 可表达）/ `BinaryDiff`（独立文件） |
 | `Checkpoint` | **仅加速恢复** | 完整快照，不承担语义 |
+
+**事务边界（`02` §3.6，永久冻结）**：一条 Command 可生成多个 Task；`submit_all()` 全部成功才 Commit，才允许产生 Diff 并进入可写 History 的位置；任一 Task 失败则整条 Command 失败、逆序 Rollback、不写 History、不留部分状态。History 永远只记录一个成功完成的 Command，绝不记录「半个 Command」。`History.record()` 的接入由 Feature-16 实现。
 
 **生成与淘汰（唯一写法）**
 

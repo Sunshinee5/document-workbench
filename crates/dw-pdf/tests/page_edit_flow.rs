@@ -152,3 +152,94 @@ fn gate_rejects_edit_when_capability_not_declared() {
     let layout = session.documents.get(id).unwrap().page_layout();
     assert!(layout.rotations.is_empty());
 }
+
+// ---- Transaction（02 §3.6）----
+
+use dw_core::lifecycle::{IExecutable, IPausable};
+use dw_core::task::Task;
+
+/// 测试专用失败任务：不接触 Document，只在第二个位置失败。
+struct FailingTask;
+
+impl IExecutable for FailingTask {
+    fn initialize(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+    fn execute(&self, _context: &ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+    fn cancel(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+    fn dispose(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl IPausable for FailingTask {
+    fn pause(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+    fn resume(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl Task for FailingTask {
+    fn required_capability(&self) -> Capability {
+        Capability::Edit
+    }
+    fn task_name(&self) -> &str {
+        "故障注入"
+    }
+    fn driver_name(&self) -> &str {
+        PDF_DRIVER
+    }
+    fn execute_on(
+        &self,
+        _context: &ExecutionContext<'_>,
+        _driver: &dyn dw_core::driver::IDriver,
+    ) -> Result<(), DwError> {
+        Err(DwError::Execution("故障注入：第二个 Task 失败".to_string()))
+    }
+}
+
+#[test]
+fn transaction_rolls_back_all_completed_tasks_and_discards_diffs() {
+    let (session, id) = setup(3, true);
+    let before = session.documents.get(id).unwrap().page_layout();
+
+    let document = session.documents.get(id).unwrap();
+    let context = ExecutionContext {
+        session: &session,
+        document,
+        workspace: &session.workspace,
+        selection: &session.selection,
+        capability_set: document.capabilities(),
+        config: Config::default(),
+        progress: Progress::default(),
+        cancel_token: CancelToken::default(),
+    };
+    let tasks: Vec<Box<dyn Task>> = vec![
+        Box::new(dw_core::task::RotatePagesTask::new(vec![1], 90)),
+        Box::new(FailingTask),
+    ];
+    let mut drivers = DriverManager::new();
+    drivers.register(Arc::new(PdfDriver::new()));
+    let mut task_manager = TaskManager::new();
+    let mut events = EventBus::new();
+
+    let error = task_manager
+        .submit_all(tasks, &context, &drivers, &mut events)
+        .unwrap_err();
+    assert!(error.to_string().contains("故障注入"));
+
+    // 第一个 Task 的 90° 必须被回滚，不能留下「半条 Command」。
+    assert_eq!(session.documents.get(id).unwrap().page_layout(), before);
+    // 本轮 Diff 全部丢弃。
+    assert!(task_manager.take_diffs().is_empty());
+    // 事件名遵循冻结清单：成功用 TaskFinished，失败用 DriverError。
+    let kinds: Vec<&str> = events.events().iter().map(|event| event.kind.as_str()).collect();
+    assert!(kinds.contains(&"TaskFinished"));
+    assert!(kinds.contains(&"DriverError"));
+}
