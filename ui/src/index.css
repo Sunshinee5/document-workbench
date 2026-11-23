@@ -186,6 +186,13 @@ body,
   background: #2a63ba;
 }
 
+.tool-group-label {
+  align-self: center;
+  color: #5b6b80;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
 .tool-divider {
   width: 1px;
   height: 20px;

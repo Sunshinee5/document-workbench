@@ -199,6 +199,7 @@ export default function App() {
           100%
         </button>
         <span className="tool-divider" />
+        <span className="tool-group-label">页面编辑</span>
         <button
           className="tool-button"
           type="button"
@@ -229,8 +230,8 @@ export default function App() {
         <button
           className="tool-button danger"
           type="button"
-          disabled={!hasDocument}
-          title="删除当前页或选中页（至少保留一页）"
+          disabled={!hasDocument || state.pageCount <= 1}
+          title={state.pageCount <= 1 ? '只有一页，无法删除' : '删除当前页或选中页'}
           onClick={() => void viewModel.deleteSelectedPages()}
         >
           删除页

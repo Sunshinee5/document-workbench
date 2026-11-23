@@ -360,6 +360,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
       <div className="viewer-empty">
         <div className="document-empty">尚未打开文档</div>
         <div className="document-hint">点击工具栏「打开 PDF」，或按 Ctrl+O。</div>
+        <div className="document-hint">打开后可旋转 / 删除 / 移动页面，并支持撤销重做。</div>
       </div>
     );
   }
