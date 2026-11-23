@@ -1,0 +1,10 @@
+[package]
+name = "dw-office"
+version.workspace = true
+edition.workspace = true
+description = "Office Driver 骨架：LibreOffice（默认）+ ONLYOFFICE（后续 Driver）占位"
+
+[dependencies]
+dw-core = { path = "../dw-core" }
+# Office 转换引擎依赖为后续实现项：当前不引入外部 CLI / SDK，避免骨架阶段环境依赖。
+# LibreOffice 以外部进程方式调用，后续在 Driver 内封装。

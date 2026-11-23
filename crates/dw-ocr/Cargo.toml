@@ -1,0 +1,11 @@
+[package]
+name = "dw-ocr"
+version.workspace = true
+edition.workspace = true
+description = "OCR Driver 骨架：Windows OCR（优先）+ Tesseract（可选）+ PaddleOCR（后续插件）占位"
+
+[dependencies]
+dw-core = { path = "../dw-core" }
+# OCR 引擎依赖为后续实现项：当前不引入系统级 / git 依赖，避免骨架阶段拉取失败。
+# windows-rs = "..."
+# tesseract = "..."

@@ -1,0 +1,8 @@
+# Cargo 本地构建配置
+# 用途：本机缺少 MSVC C++ 链接器（link.exe），GNU target 使用 LLVM-MinGW 工具链链接。
+# 工具链位置：D:\Downloads\VSBuildTools\llvm-mingw\toolchain\bin
+# 说明：仅在 x86_64-pc-windows-gnu target 下指定链接器；默认 MSVC target 不受影响。
+
+[target.x86_64-pc-windows-gnu]
+linker = "D:/Downloads/VSBuildTools/llvm-mingw/toolchain/bin/gcc.exe"
+ar = "D:/Downloads/VSBuildTools/llvm-mingw/toolchain/bin/ar.exe"

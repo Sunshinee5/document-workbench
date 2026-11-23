@@ -1,0 +1,15 @@
+{
+  "name": "document-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Document Workbench - Windows 本地绿色版文档工作台",
+  "scripts": {
+    "dev": "pnpm --dir ui dev",
+    "build": "pnpm --dir ui build",
+    "typecheck": "pnpm --dir ui typecheck"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@9.0.0"
+}

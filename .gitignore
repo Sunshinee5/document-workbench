@@ -1,0 +1,31 @@
+# Rust 构建产物
+/target/
+**/target/
+
+# Node 依赖与前端产物
+node_modules/
+**/node_modules/
+dist/
+**/dist/
+
+# 运行期目录：内容不入库，仅保留 README 占位说明
+Recovery/*
+!Recovery/README.md
+# 编辑产生的 Diff 实体与临时文件
+Recovery/diffs/
+*.tmp
+*.swp
+cache/*
+!cache/README.md
+logs/*
+!logs/README.md
+*.log
+
+# 工作区内部数据（不是源码）
+.workbuddy-ai/
+
+# IDE 与操作系统文件
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

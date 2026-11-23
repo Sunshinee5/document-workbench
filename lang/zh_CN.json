@@ -1,0 +1,22 @@
+{
+  "app.name": "文档工作台",
+  "app.welcome": "欢迎使用文档工作台",
+  "menu.file": "文件",
+  "menu.edit": "编辑",
+  "menu.view": "视图",
+  "menu.help": "帮助",
+  "action.open": "打开",
+  "action.save": "保存",
+  "action.export": "导出",
+  "action.print": "打印",
+  "action.ocr": "OCR 识别",
+  "action.convert": "格式转换",
+  "action.undo": "撤销",
+  "action.redo": "重做",
+  "state.ready": "就绪",
+  "state.loading": "加载中",
+  "state.processing": "处理中",
+  "error.capabilityNotSupported": "当前文档不支持此操作",
+  "error.taskRejected": "任务已被拒绝",
+  "error.driverFailed": "驱动执行失败"
+}

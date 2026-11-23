@@ -1,0 +1,7 @@
+[package]
+name = "dw-runtime"
+version.workspace = true
+edition.workspace = true
+description = "Runtime：运行环境目录管理骨架（Fonts / Cache / Temp / Logs / Config），禁止业务逻辑"
+
+[dependencies]

@@ -1,0 +1,23 @@
+[package]
+name = "dw-desktop"
+version.workspace = true
+edition.workspace = true
+description = "Document Workbench 桌面壳：Tauri 2 + Rust，窗口标题中文、绿色版配置"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dw-core = { path = "../../crates/dw-core" }
+dw-runtime = { path = "../../crates/dw-runtime" }
+dw-pdf = { path = "../../crates/dw-pdf" }
+tauri-plugin-dialog = "2"
+
+# 发布构建必须开启：tauri 的 build.rs 以 `!custom-protocol` 判定 dev，
+# 没有这个 feature 时二进制会去连 devUrl（localhost:5173），绿色版打开就是「拒绝连接」。
+# 本项目不使用 tauri CLI，因此由 scripts/package.sh 显式传 --features custom-protocol。
+[features]
+custom-protocol = ["tauri/custom-protocol"]

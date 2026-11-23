@@ -1,0 +1,10 @@
+# Shell 脚本必须保持 LF，否则 Windows 下 bash 执行会报 \r 错误
+*.sh text eol=lf
+
+# 二进制资源
+*.png binary
+*.jpg binary
+*.ttf binary
+*.otf binary
+*.bcmap binary
+*.ico binary

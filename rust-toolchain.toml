@@ -1,0 +1,5 @@
+# 使用稳定版 Rust，不引入 nightly 或自定义工具链
+[toolchain]
+channel = "stable"
+profile = "minimal"
+components = ["rustfmt", "clippy"]

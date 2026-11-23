@@ -1,0 +1,11 @@
+[package]
+name = "dw-core"
+version.workspace = true
+edition.workspace = true
+description = "Document Workbench 核心库：冻结架构的类型、trait 与横切组件定义（骨架）"
+
+[dependencies]
+# 核心库允许基础序列化依赖（serde / serde_json），用于 History / Diff 的元数据落盘；
+# 禁止依赖 UI / Runtime / 第三方业务库，确保 dw-core 可独立 cargo check。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"

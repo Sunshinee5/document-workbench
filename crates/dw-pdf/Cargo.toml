@@ -1,0 +1,12 @@
+[package]
+name = "dw-pdf"
+version.workspace = true
+edition.workspace = true
+description = "PDF Driver 骨架：PDFium（渲染）+ lopdf（对象操作）占位，不写实际逻辑"
+
+[dependencies]
+dw-core = { path = "../dw-core" }
+lopdf = "0.34"
+# PDFium 绑定与 lopdf 为后续实现依赖：当前不引入，避免骨架阶段拉取难装库。
+# pdfium-render = "..."
+# lopdf = "..."

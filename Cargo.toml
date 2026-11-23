@@ -1,0 +1,17 @@
+# Document Workbench Cargo Workspace 根清单
+# 冻结技术栈：Rust Core + Tauri 2 Desktop；禁止 CMake / C++ Runtime
+[workspace]
+resolver = "2"
+members = [
+    "crates/dw-core",
+    "crates/dw-runtime",
+    "crates/dw-pdf",
+    "crates/dw-ocr",
+    "crates/dw-office",
+    "apps/dw-desktop",
+]
+
+# 统一版本，子 crate 通过 version.workspace / edition.workspace 继承
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
