@@ -5,7 +5,7 @@
 use crate::capability::{capability_gate, Capability};
 use crate::diff::Diff;
 use crate::document::{DocumentSnapshot, DocumentState};
-use crate::driver::{DriverManager, IDriver, PDF_DRIVER, EMPTY_DRIVER};
+use crate::driver::{DriverManager, IDriver, EMPTY_DRIVER, PDF_DRIVER};
 use crate::error::{DwError, TaskRejected};
 use crate::eventbus::{Event, EventBus};
 use crate::lifecycle::{IExecutable, IPausable};
@@ -28,10 +28,19 @@ pub trait Task: IExecutable {
 
     /// 本 Task 产出的 Diff（一个 Task 最多 1 个，`02` §5.3）。
     ///
+    /// **执行前调用**：Task 此时能从 Context 读到改动前的文档状态，
+    /// 因此删页 Diff 可以带上被删页的原始页码与旋转角，供 Undo 还原。
     /// 默认 `None`：打开 / 选择等不改内容的 Task 不产 Diff。
-    /// TaskManager 在 submit 成功后统一收口，Command 再把它们交给 History。
-    fn diff(&self) -> Option<Diff> {
+    fn diff(&self, _context: &crate::context::ExecutionContext<'_>) -> Option<Diff> {
         None
+    }
+
+    /// 事务失败时的业务补偿：默认 NoOp。
+    ///
+    /// Rotate / Delete / Move 的内存状态由 TaskManager 的 `DocumentSnapshot` 统一回滚；
+    /// Merge / OCR / Office / Split 等有外部副作用的 Task 必须覆盖此方法（文档 16 §7）。
+    fn rollback(&self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
     }
 
     /// 经 Driver 执行：冻结链路 Task → Driver → Runtime 的唯一入口。
@@ -122,14 +131,12 @@ impl OpenDocumentTask {
             )));
         }
         if !path.is_file() {
-            return Err(DwError::Execution(format!(
-                "不是文件：{}",
-                path.display()
-            )));
+            return Err(DwError::Execution(format!("不是文件：{}", path.display())));
         }
         // 以只读方式打开一次：既验证可读权限，也能拿到文件大小。
-        std::fs::File::open(path)
-            .map_err(|error| DwError::Execution(format!("文件无法读取：{}（{}）", path.display(), error)))?;
+        std::fs::File::open(path).map_err(|error| {
+            DwError::Execution(format!("文件无法读取：{}（{}）", path.display(), error))
+        })?;
         Ok(())
     }
 }
@@ -261,7 +268,7 @@ impl Task for RotatePagesTask {
         PDF_DRIVER
     }
 
-    fn diff(&self) -> Option<Diff> {
+    fn diff(&self, _context: &crate::context::ExecutionContext<'_>) -> Option<Diff> {
         Some(Diff::rotation(&crate::diff::RotationDiff {
             pages: self.pages.clone(),
             degrees: self.degrees,
@@ -273,9 +280,9 @@ impl Task for RotatePagesTask {
         context: &crate::context::ExecutionContext<'_>,
         driver: &dyn IDriver,
     ) -> Result<(), DwError> {
-        let editor = driver.page_editor().ok_or_else(|| {
-            DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name()))
-        })?;
+        let editor = driver
+            .page_editor()
+            .ok_or_else(|| DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name())))?;
         editor
             .rotate_pages(context.document, &self.pages, self.degrees)
             .map_err(DwError::Driver)?;
@@ -338,9 +345,24 @@ impl Task for DeletePagesTask {
         PDF_DRIVER
     }
 
-    fn diff(&self) -> Option<Diff> {
+    fn diff(&self, context: &crate::context::ExecutionContext<'_>) -> Option<Diff> {
+        // 执行前取快照：删页后原始页码就丢了，无法 revert。
+        let mut positions = self.pages.clone();
+        positions.sort_unstable();
+        positions.dedup();
+        let layout = context.document.page_layout();
+        let removed: Vec<u32> = positions
+            .iter()
+            .filter_map(|position| layout.order.get(*position as usize - 1).copied())
+            .collect();
+        let rotations: Vec<(u32, i32)> = removed
+            .iter()
+            .map(|page| (*page, layout.rotation_of(*page)))
+            .collect();
         Some(Diff::delete_page(&crate::diff::DeletePageDiff {
             pages: self.pages.clone(),
+            removed,
+            rotations,
         }))
     }
 
@@ -349,9 +371,9 @@ impl Task for DeletePagesTask {
         context: &crate::context::ExecutionContext<'_>,
         driver: &dyn IDriver,
     ) -> Result<(), DwError> {
-        let editor = driver.page_editor().ok_or_else(|| {
-            DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name()))
-        })?;
+        let editor = driver
+            .page_editor()
+            .ok_or_else(|| DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name())))?;
         editor
             .delete_pages(context.document, &self.pages)
             .map_err(DwError::Driver)?;
@@ -416,7 +438,7 @@ impl Task for MovePagesTask {
         PDF_DRIVER
     }
 
-    fn diff(&self) -> Option<Diff> {
+    fn diff(&self, _context: &crate::context::ExecutionContext<'_>) -> Option<Diff> {
         Some(Diff::move_page(&crate::diff::MovePageDiff {
             from: self.from,
             to: self.to,
@@ -428,9 +450,9 @@ impl Task for MovePagesTask {
         context: &crate::context::ExecutionContext<'_>,
         driver: &dyn IDriver,
     ) -> Result<(), DwError> {
-        let editor = driver.page_editor().ok_or_else(|| {
-            DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name()))
-        })?;
+        let editor = driver
+            .page_editor()
+            .ok_or_else(|| DwError::Execution(format!("驱动 {} 不支持页编辑", driver.name())))?;
         editor
             .move_pages(context.document, self.from, self.to)
             .map_err(DwError::Driver)?;
@@ -464,17 +486,25 @@ impl TaskManager {
     }
 
     /// 提交单个 Task：先 Capability Gate，再经 Driver 执行。
-    ///
-    /// `drivers` 是唯一 Driver 入口，`events` 是唯一事件总线，均由调用方传入。
     pub fn submit(
         &mut self,
-        task: Box<dyn Task>,
+        mut task: Box<dyn Task>,
+        context: &crate::context::ExecutionContext<'_>,
+        drivers: &DriverManager,
+        events: &mut EventBus,
+    ) -> Result<(), DwError> {
+        self.execute_one(task.as_mut(), context, drivers, events)
+    }
+
+    /// 单个 Task 的实际执行：被 `submit` 与 `submit_all` 共用。
+    fn execute_one(
+        &mut self,
+        task: &mut dyn Task,
         context: &crate::context::ExecutionContext<'_>,
         drivers: &DriverManager,
         events: &mut EventBus,
     ) -> Result<(), DwError> {
         // Capability Gate：Task 入图前唯一一次校验。
-        // `00` §4.4：`CapabilityNotSupported` 是内部信号，对外唯一出口是 `TaskRejected`。
         if let Err(error) = capability_gate(context, task.required_capability()) {
             let reason = match error {
                 DwError::CapabilityNotSupported(info) => {
@@ -484,49 +514,56 @@ impl TaskManager {
             };
             return Err(DwError::TaskRejected(TaskRejected { reason }));
         }
-        // 按 Task 声明的名字解析 Driver（`00` §8.4）：查找即释放锁，执行期间不持 Manager 锁。
         let driver_name = task.driver_name().to_string();
         let driver = drivers.resolve(&driver_name).ok_or_else(|| {
-            DwError::Execution(format!("未注册的驱动：{}（见 DriverManager::names）", driver_name))
+            DwError::Execution(format!(
+                "未注册的驱动：{}（见 DriverManager::names）",
+                driver_name
+            ))
         })?;
-        // 生命周期：先 initialize（任务级前置校验），再经 Driver 执行。
-        let mut task = task;
+
+        // Diff 必须在执行前构造：删页 Task 要从 Context 读被删页的原始页码。
+        let diff = task.diff(context);
         task.initialize()?;
-        // 解引用 `Arc` 得到 `&dyn IDriver`：Task 只认 trait 对象，不认所有权形式。
         task.execute_on(context, driver.as_ref())?;
-        // Diff 由 Task 构造、TaskManager 收口；顺序即执行顺序，不得重排（`02` §5.3）。
-        if let Some(diff) = task.diff() {
+        if let Some(diff) = diff {
             self.diffs.push(diff);
         }
-        // 事件通知：UI 只监听，不直接调用 Task。
         events.publish(Event::task_finished(task.task_name()));
         Ok(())
     }
 
     /// 提交一批 Task（`Command::build_tasks` 的产物）：**具有事务语义**（`02` §3.6）。
     ///
-    /// 全部成功 → Diff 保留，调用方进入 Commit；任一失败 → 逆序回滚已完成的 Task、
-    /// 丢弃本轮 Diff、发布 `DriverError`，对外只返回错误。History 永不记录半个 Command。
+    /// 全部成功 → Diff 由调用方进入 Commit 并写 History；
+    /// 任一失败 → 先调每个已完成 Task 的 `rollback()`，再逆序恢复 `DocumentSnapshot`，
+    /// 丢弃本轮 Diff、发布 `RollbackCompleted` + `DriverError`。History 永不记录半个 Command。
     pub fn submit_all(
         &mut self,
-        tasks: Vec<Box<dyn Task>>,
+        mut tasks: Vec<Box<dyn Task>>,
         context: &crate::context::ExecutionContext<'_>,
         drivers: &DriverManager,
         events: &mut EventBus,
     ) -> Result<(), DwError> {
         let diff_baseline = self.diffs.len();
-        let mut completed: Vec<DocumentSnapshot> = Vec::new();
+        let mut completed: Vec<(usize, DocumentSnapshot)> = Vec::new();
 
-        for task in tasks {
+        for (index, task) in tasks.iter_mut().enumerate() {
             let before = context.document.snapshot();
-            match self.submit(task, context, drivers, events) {
-                Ok(()) => completed.push(before),
+            match self.execute_one(task.as_mut(), context, drivers, events) {
+                Ok(()) => completed.push((index, before)),
                 Err(error) => {
-                    // 逆序补偿：后执行的先回滚，避免把文档留在中间态。
-                    for snapshot in completed.iter().rev() {
+                    // 先做 Task 自己的业务补偿，再统一还原内存状态；顺序均为逆序。
+                    for (task_index, _) in completed.iter().rev() {
+                        if let Err(compensation) = tasks[*task_index].rollback(context) {
+                            dw_log::warn("rollback", &format!("任务补偿失败：{}", compensation));
+                        }
+                    }
+                    for (_, snapshot) in completed.iter().rev() {
                         context.document.restore(snapshot);
                     }
                     self.diffs.truncate(diff_baseline);
+                    events.publish(Event::rollback_completed());
                     events.publish(Event::driver_error(&error.to_string()));
                     return Err(error);
                 }
@@ -561,9 +598,7 @@ pub struct ExecutionGraph {
 impl ExecutionGraph {
     /// 构造空执行图：Stage 1 空流程尚无依赖边。
     pub fn new() -> Self {
-        Self {
-            edges: Vec::new(),
-        }
+        Self { edges: Vec::new() }
     }
 
     /// 依赖边数量：供 Stage 1 状态展示，空流程恒为 0。

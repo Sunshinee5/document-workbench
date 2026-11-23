@@ -5,6 +5,7 @@
 
 pub mod action;
 pub mod capability;
+pub mod checkpoint;
 pub mod clipboard;
 pub mod command;
 pub mod context;
@@ -41,6 +42,7 @@ mod skeleton_tests {
             params: serde_json::json!({ "page": command_id, "rotation": 90 }),
             diff_reference: vec![DiffRef(format!("diff{:03}", command_id))],
             timestamp: command_id,
+            version: 1,
         }
     }
 
@@ -55,11 +57,7 @@ mod skeleton_tests {
             selection: Selection::default(),
             clipboard: Clipboard::default(),
         };
-        let document = Document::new(
-            DocumentId(1),
-            DocumentKind::Pdf,
-            CapabilitySet::default(),
-        );
+        let document = Document::new(DocumentId(1), DocumentKind::Pdf, CapabilitySet::default());
         let context = ExecutionContext {
             session: &session,
             document: &document,
@@ -110,11 +108,7 @@ mod skeleton_tests {
     /// 验收测试 2：Document 写路径。经 mutate() 改 DocumentInner，再用 read() 读回必须可见。
     #[test]
     fn document_mutate_and_read() {
-        let document = Document::new(
-            DocumentId(9),
-            DocumentKind::Pdf,
-            CapabilitySet::default(),
-        );
+        let document = Document::new(DocumentId(9), DocumentKind::Pdf, CapabilitySet::default());
         assert_eq!(document.read(|inner| inner.revision), 0);
 
         let written = document.mutate(|inner| {

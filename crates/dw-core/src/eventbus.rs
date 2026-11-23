@@ -53,6 +53,42 @@ impl Event {
     pub fn driver_error(message: &str) -> Self {
         Self::new("DriverError", format!("驱动错误：{}", message))
     }
+
+    /// `HistoryRecorded`：Command 成功 Commit 并写入 History 后。
+    pub fn history_recorded(command_id: u64) -> Self {
+        Self::new("HistoryRecorded", format!("已记录命令：{}", command_id))
+    }
+
+    /// `UndoExecuted`：Diff 反向回放成功后。
+    pub fn undo_executed(command_id: u64) -> Self {
+        Self::new("UndoExecuted", format!("已撤销命令：{}", command_id))
+    }
+
+    /// `RedoExecuted`：Diff 正向回放成功后。
+    pub fn redo_executed(command_id: u64) -> Self {
+        Self::new("RedoExecuted", format!("已重做命令：{}", command_id))
+    }
+
+    /// `CheckpointCreated`：Checkpoint 落盘成功后。
+    pub fn checkpoint_created(revision: u64) -> Self {
+        Self::new(
+            "CheckpointCreated",
+            format!("已创建检查点：修订号 {}", revision),
+        )
+    }
+
+    /// `RollbackCompleted`：事务失败且逆序补偿完成后。
+    pub fn rollback_completed() -> Self {
+        Self::new("RollbackCompleted", "事务已回滚")
+    }
+
+    /// `HistoryTruncated`：redo 分支被新 Command 截断后。
+    pub fn history_truncated(command_id: u64) -> Self {
+        Self::new(
+            "HistoryTruncated",
+            format!("已截断重做分支：命令 {}", command_id),
+        )
+    }
 }
 
 /// 事件总线：记录已发布事件，供 ViewModel 查询结果。
@@ -65,9 +101,7 @@ pub struct EventBus {
 impl EventBus {
     /// 构造空事件总线。
     pub fn new() -> Self {
-        Self {
-            events: Vec::new(),
-        }
+        Self { events: Vec::new() }
     }
 
     /// 发布事件。

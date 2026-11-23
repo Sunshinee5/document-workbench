@@ -20,7 +20,7 @@ fn driver_error(message: impl Into<String>) -> DriverError {
 
 /// 把角度归一到 0 / 90 / 180 / 270。
 fn normalize(degrees: i32) -> i32 {
-    ((degrees % 360) + 360) % 360
+    degrees.rem_euclid(360)
 }
 
 /// 校验位置列表：去重、按升序返回；越界直接报错。
@@ -127,12 +127,7 @@ impl IPageEdit for PdfPageEditor {
         Ok(())
     }
 
-    fn move_pages(
-        &self,
-        document: &Document,
-        from: u32,
-        to: u32,
-    ) -> Result<(), DriverError> {
+    fn move_pages(&self, document: &Document, from: u32, to: u32) -> Result<(), DriverError> {
         let mut layout = document.page_layout();
         if layout.is_empty() {
             return Err(driver_error("页布局尚未初始化，无法移动"));
@@ -166,11 +161,7 @@ mod tests {
     use dw_core::document::{DocumentId, DocumentKind};
 
     fn document_with(count: usize) -> Document {
-        let document = Document::new(
-            DocumentId(1),
-            DocumentKind::Pdf,
-            CapabilitySet::new(),
-        );
+        let document = Document::new(DocumentId(1), DocumentKind::Pdf, CapabilitySet::new());
         document.set_page_layout(initial_layout(count));
         document
     }
@@ -178,7 +169,9 @@ mod tests {
     #[test]
     fn rotate_one_page() {
         let document = document_with(1);
-        PdfPageEditor::new().rotate_pages(&document, &[1], 90).unwrap();
+        PdfPageEditor::new()
+            .rotate_pages(&document, &[1], 90)
+            .unwrap();
         assert_eq!(document.page_layout().rotation_of(1), 90);
     }
 
@@ -188,7 +181,9 @@ mod tests {
             let document = document_with(count);
             let editor = PdfPageEditor::new();
             editor.rotate_pages(&document, &[1], 90).unwrap();
-            editor.rotate_pages(&document, &[count as u32], 180).unwrap();
+            editor
+                .rotate_pages(&document, &[count as u32], 180)
+                .unwrap();
             editor.rotate_pages(&document, &[1], 270).unwrap();
             assert_eq!(document.page_layout().rotation_of(1), 0);
             assert_eq!(document.page_layout().rotation_of(count as u32), 180);

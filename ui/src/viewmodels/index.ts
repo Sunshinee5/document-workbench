@@ -10,11 +10,15 @@ import {
   openDocument,
   pickPdfFile,
   clearPageSelection,
+  canRedo,
+  canUndo,
   deletePages,
   getPageLayout,
   movePages,
+  redo,
   rotatePages,
   setPageSelection,
+  undo,
   setViewState,
   type AppInfo,
   type DocumentInfo,
@@ -63,6 +67,12 @@ export interface WorkbenchState {
   selectedPages: number[];
   /** 页结构版本号：变化即让查看器重渲染，Thumbnail 也随之刷新 */
   layoutRevision: number;
+  /** 是否可撤销（History.cursor 投影） */
+  canUndo: boolean;
+  /** 是否可重做（History.cursor 投影） */
+  canRedo: boolean;
+  /** 文档是否有未保存修改 */
+  dirty: boolean;
 }
 
 /** 缩放档位：产品只给有限档，避免自由输入造成视图抖动。 */
@@ -89,6 +99,9 @@ export class WorkbenchViewModel {
     rotations: {},
     selectedPages: [],
     layoutRevision: 0,
+    canUndo: false,
+    canRedo: false,
+    dirty: false,
   };
 
   private listeners: Array<() => void> = [];
@@ -128,6 +141,7 @@ export class WorkbenchViewModel {
       status: `就绪 · ${info.name} ${info.version}`,
     });
     await this.refreshTabs();
+    await this.refreshHistoryState();
   }
 
   /** 从后端拉取页签列表：以 `Workspace.tabs` 为准，不在前端自行维护顺序。 */
@@ -181,6 +195,7 @@ export class WorkbenchViewModel {
         selectedPages: [],
       });
       await this.refreshLayout(info.document_id);
+      await this.refreshHistoryState();
     } catch (error) {
       this.update({
         loading: false,
@@ -208,6 +223,7 @@ export class WorkbenchViewModel {
       selectedPages: [],
     });
     await this.refreshLayout(documentId);
+    await this.refreshHistoryState();
   }
 
   /** 关闭文档：移除 Document 与页签。 */
@@ -321,6 +337,38 @@ export class WorkbenchViewModel {
 
   // ---- Feature-02：页面编辑。所有方法都只调 IPC，不直接改 Document。 ----
 
+  /** 刷新 History 游标投影：撤销 / 重做按钮的禁用态以它为准。 */
+  async refreshHistoryState(): Promise<void> {
+    try {
+      const [undoable, redoable] = await Promise.all([canUndo(), canRedo()]);
+      this.update({ canUndo: undoable, canRedo: redoable });
+    } catch {
+      // 浏览器预览环境无后端：按钮保持禁用即可。
+    }
+  }
+
+  /** 撤销：后端只回放 Diff，前端消费布局摘要。 */
+  async undo(): Promise<void> {
+    try {
+      const info = await undo();
+      this.applyLayout(info);
+      await this.refreshHistoryState();
+    } catch (error) {
+      this.update({ error: messageOf(error) });
+    }
+  }
+
+  /** 重做：后端只回放 Diff，前端消费布局摘要。 */
+  async redo(): Promise<void> {
+    try {
+      const info = await redo();
+      this.applyLayout(info);
+      await this.refreshHistoryState();
+    } catch (error) {
+      this.update({ error: messageOf(error) });
+    }
+  }
+
   /** 从后端拉取页布局：打开新文档 / 切换文档后调用，前端不缓存第二份真值。 */
   async refreshLayout(documentId: number): Promise<void> {
     try {
@@ -343,7 +391,8 @@ export class WorkbenchViewModel {
       selectedPages: info.selected_pages,
       currentPage: info.current_page,
       layoutRevision: this.stateValue.layoutRevision + 1,
-      status: `页面已更新 · 共 ${info.page_count} 页 · Diff ${info.diff_count} 条（History 归 16）`,
+      dirty: info.dirty,
+      status: `页面已更新 · 共 ${info.page_count} 页 · 已记录 ${info.diff_count} 条 Diff · ${info.dirty ? '未保存' : '已保存'}`,
     });
   }
 
@@ -358,6 +407,7 @@ export class WorkbenchViewModel {
         ? this.stateValue.selectedPages
         : [this.stateValue.currentPage];
       this.applyLayout(await rotatePages(id, pages, delta));
+      await this.refreshHistoryState();
     } catch (error) {
       this.update({ error: messageOf(error) });
     }
@@ -374,6 +424,7 @@ export class WorkbenchViewModel {
         ? this.stateValue.selectedPages
         : [this.stateValue.currentPage];
       this.applyLayout(await deletePages(id, pages));
+      await this.refreshHistoryState();
     } catch (error) {
       this.update({ error: messageOf(error) });
     }
@@ -387,6 +438,7 @@ export class WorkbenchViewModel {
     }
     try {
       this.applyLayout(await movePages(id, from, to));
+      await this.refreshHistoryState();
     } catch (error) {
       this.update({ error: messageOf(error) });
     }

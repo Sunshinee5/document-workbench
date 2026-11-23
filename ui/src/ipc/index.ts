@@ -163,8 +163,10 @@ export interface PageLayoutInfo {
   rotations: PageRotationInfo[];
   current_page: number;
   selected_pages: number[];
-  /** 本轮生成并暂存的 Diff 数量；History 写入归后续 Feature。 */
+  /** 本轮写入 History 的 Diff 数量。 */
   diff_count: number;
+  /** 文档是否有未保存修改。 */
+  dirty: boolean;
 }
 
 /** 旋转页面：pages 为空时后端退化为当前页。 */
@@ -213,4 +215,24 @@ export async function clearPageSelection(): Promise<void> {
 /** 查询页布局：切换文档或界面重挂时拉取，前端不缓存第二份真值。 */
 export async function getPageLayout(documentId: number): Promise<PageLayoutInfo> {
   return invoke<PageLayoutInfo>('get_page_layout', { documentId });
+}
+
+/** 撤销：只回放 Diff，不重跑 Driver。 */
+export async function undo(): Promise<PageLayoutInfo> {
+  return invoke<PageLayoutInfo>('undo');
+}
+
+/** 重做：只回放 Diff，不重跑 Driver。 */
+export async function redo(): Promise<PageLayoutInfo> {
+  return invoke<PageLayoutInfo>('redo');
+}
+
+/** 是否可撤销：工具栏禁用态。 */
+export async function canUndo(): Promise<boolean> {
+  return invoke<boolean>('can_undo');
+}
+
+/** 是否可重做：工具栏禁用态。 */
+export async function canRedo(): Promise<boolean> {
+  return invoke<boolean>('can_redo');
 }

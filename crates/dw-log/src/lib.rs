@@ -120,39 +120,54 @@ pub fn retain(days: i64) {
 fn now_parts() -> (String, String) {
     #[cfg(windows)]
     {
-        unsafe {
-            let mut time = SYSTEMTIME::default();
-            GetLocalTime(&mut time);
-            return (
-                format!("{:04}-{:02}-{:02}", time.w_year, time.w_month, time.w_day),
-                format!("{:02}:{:02}:{:02}", time.w_hour, time.w_minute, time.w_second),
-            );
-        }
+        windows_local_parts()
     }
     #[cfg(not(windows))]
     {
-        let seconds = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map(|duration| duration.as_secs() as i64)
-            .unwrap_or(0);
-        let days = seconds.div_euclid(86_400);
-        let remainder = seconds.rem_euclid(86_400);
-        let (year, month, day) = civil_from_days(days);
-        let hour = remainder / 3_600;
-        let minute = (remainder % 3_600) / 60;
-        let second = remainder % 60;
+        utc_parts()
+    }
+}
+
+/// Windows 本地时间：系统 API 调用点集中在这里。
+#[cfg(windows)]
+fn windows_local_parts() -> (String, String) {
+    unsafe {
+        let mut time = Systemtime::default();
+        GetLocalTime(&mut time);
         (
-            format!("{:04}-{:02}-{:02}", year, month, day),
-            format!("{:02}:{:02}:{:02}", hour, minute, second),
+            format!("{:04}-{:02}-{:02}", time.w_year, time.w_month, time.w_day),
+            format!(
+                "{:02}:{:02}:{:02}",
+                time.w_hour, time.w_minute, time.w_second
+            ),
         )
     }
+}
+
+/// 非 Windows 回退：UTC，仅供单元测试。
+#[cfg(not(windows))]
+fn utc_parts() -> (String, String) {
+    let seconds = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs() as i64)
+        .unwrap_or(0);
+    let days = seconds.div_euclid(86_400);
+    let remainder = seconds.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = remainder / 3_600;
+    let minute = (remainder % 3_600) / 60;
+    let second = remainder % 60;
+    (
+        format!("{:04}-{:02}-{:02}", year, month, day),
+        format!("{:02}:{:02}:{:02}", hour, minute, second),
+    )
 }
 
 /// Windows 本地时间结构：`GetLocalTime` 的输出，字段顺序不可改。
 #[cfg(windows)]
 #[repr(C)]
 #[derive(Default)]
-struct SYSTEMTIME {
+struct Systemtime {
     /// 年。
     w_year: u16,
     /// 月。
@@ -174,12 +189,15 @@ struct SYSTEMTIME {
 #[cfg(windows)]
 extern "system" {
     /// 取系统本地时间；无第三方依赖。
-    fn GetLocalTime(time: *mut SYSTEMTIME);
+    fn GetLocalTime(time: *mut Systemtime);
 }
 
 /// `YYYY-MM-DD` → 距 1970-01-01 的天数；非法字符串返回 0。
 fn date_to_days(text: &str) -> i64 {
-    let parts: Vec<i64> = text.split('-').filter_map(|part| part.parse().ok()).collect();
+    let parts: Vec<i64> = text
+        .split('-')
+        .filter_map(|part| part.parse().ok())
+        .collect();
     if parts.len() != 3 {
         return 0;
     }

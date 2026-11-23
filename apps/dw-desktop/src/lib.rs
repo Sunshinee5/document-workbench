@@ -31,7 +31,11 @@ pub fn run() {
             ipc::move_pages,
             ipc::set_page_selection,
             ipc::clear_page_selection,
-            ipc::get_page_layout
+            ipc::get_page_layout,
+            ipc::undo,
+            ipc::redo,
+            ipc::can_undo,
+            ipc::can_redo
         ])
         .run(tauri::generate_context!())
         .expect("文档工作台启动失败");

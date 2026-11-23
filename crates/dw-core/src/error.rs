@@ -47,7 +47,11 @@ impl fmt::Display for DwError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             DwError::CapabilityNotSupported(error) => {
-                write!(formatter, "能力不支持: {} ({})", error.capability, error.message)
+                write!(
+                    formatter,
+                    "能力不支持: {} ({})",
+                    error.capability, error.message
+                )
             }
             DwError::TaskRejected(error) => write!(formatter, "任务被拒绝: {}", error.reason),
             DwError::Driver(error) => {

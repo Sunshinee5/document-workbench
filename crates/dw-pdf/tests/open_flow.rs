@@ -83,12 +83,11 @@ fn open_document_reaches_ready_with_metadata() {
     let mut session = Session::create();
     let kind = DocumentKind::from_path(&path).expect("扩展名应识别为 PDF");
     let document_id = session.documents.create(kind, kind.declared_capabilities());
-    let document = session
-        .documents
-        .get(document_id)
-        .expect("文档应已注册");
+    let document = session.documents.get(document_id).expect("文档应已注册");
     document.set_source_path(&path);
-    session.workspace.add_tab(document_id, "Feature-01 验收样张");
+    session
+        .workspace
+        .add_tab(document_id, "Feature-01 验收样张");
     assert_eq!(document.state(), DocumentState::Created);
 
     // ② 组装 Context（严格 8 字段），能力来自 create() 时的声明。
@@ -204,7 +203,11 @@ fn gate_rejects_when_render_not_declared() {
         .submit_all(tasks, &context, &drivers, &mut events)
         .expect_err("空能力集必须被 Gate 拒绝");
     let text = error.to_string();
-    assert!(text.contains("任务被拒绝"), "对外唯一出口应是 TaskRejected：{}", text);
+    assert!(
+        text.contains("任务被拒绝"),
+        "对外唯一出口应是 TaskRejected：{}",
+        text
+    );
 
     let _ = std::fs::remove_file(&path);
 }

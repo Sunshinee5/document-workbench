@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::RwLock;
 
+use serde::{Deserialize, Serialize};
+
 use crate::capability::{Capability, CapabilitySet, HasCapability};
 
 /// 文档标识：由 DocumentStore 在 Session 内单调递增分配，不引入 uuid 依赖。
@@ -23,7 +25,7 @@ pub struct DocumentId(pub u64);
 ///
 /// 字段固定 6 个（`01` §5.1）：标题 / 作者 / 页数 / 文件大小 / 修改时间 / 源文件路径。
 /// 路径只存 `source_path` 一处，禁止在别处再存一份 `path`。
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct DocumentMetadata {
     /// 文档标题；PDF 无标题时回退为文件名。
     pub title: String,
@@ -46,7 +48,7 @@ pub struct DocumentMetadata {
 ///
 /// `order` 存原始页码（1 起），移动只改顺序不丢身份；`rotations` 也按原始页码索引，
 /// 因此移动页面不会把旋转角带错页。
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PageLayout {
     /// 当前显示顺序，元素是原始页码（1 起）。
     pub order: Vec<u32>,
@@ -165,7 +167,7 @@ impl DocumentKind {
 }
 
 /// 文档状态机：由 State 驱动 UI，UI 不自行判断业务状态。
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum DocumentState {
     /// 已创建（仅分配了 id，尚未加载内容）。
     #[default]
@@ -343,7 +345,7 @@ impl Document {
 ///
 /// 它只覆盖 Document 的内存状态（元数据 / 状态 / 修订号 / 页布局）。
 /// 涉及文件与外部进程的 Driver 仍需各自提供补偿，见 `02` §3.6 R3。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentSnapshot {
     /// 内容修订号。
     pub revision: u64,

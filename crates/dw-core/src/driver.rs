@@ -40,12 +40,7 @@ pub trait IPageEdit: Send + Sync {
     fn delete_pages(&self, document: &Document, pages: &[u32]) -> Result<(), DriverError>;
 
     /// 把 `from` 位置的页移动到 `to` 位置（均为当前显示顺序的 1 起位置）。
-    fn move_pages(
-        &self,
-        document: &Document,
-        from: u32,
-        to: u32,
-    ) -> Result<(), DriverError>;
+    fn move_pages(&self, document: &Document, from: u32, to: u32) -> Result<(), DriverError>;
 }
 
 pub trait IDriver: IExecutable + IHealthCheck + Send + Sync {

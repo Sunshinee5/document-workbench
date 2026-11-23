@@ -5,16 +5,18 @@
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use dw_core::action::UserAction;
 use dw_core::capability::{Capability, CapabilitySet, HasCapability};
+use dw_core::checkpoint::CheckpointStore;
 use dw_core::command::{Command, NewSessionCommand, OpenDocumentCommand};
 use dw_core::context::{CancelToken, Config, ExecutionContext, Progress};
 use dw_core::document::{Document, DocumentId, DocumentKind};
 use dw_core::driver::DriverManager;
 use dw_core::eventbus::{Event, EventBus};
 use dw_core::lifecycle::IExecutable;
-use dw_core::session::{SessionManager, SessionState};
+use dw_core::session::{CommandRecord, SessionManager, SessionState};
 use dw_core::task::TaskManager;
 use serde::Serialize;
 
@@ -70,6 +72,14 @@ fn session_state_text(state: SessionState) -> &'static str {
         SessionState::Closing => "关闭中",
         SessionState::Disposed => "已释放",
     }
+}
+
+/// 当前 Unix 毫秒时间戳：History 记录用，不引入 chrono。
+fn now_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 /// 应用信息：供状态栏展示，证明 IPC 已打通。
@@ -130,9 +140,9 @@ pub fn new_session(state: tauri::State<'_, CoreState>) -> Result<SessionInfo, St
     let document_id: DocumentId = {
         let mut manager = lock(&state.session_manager);
         let session_id = manager.create_session();
-        let session = manager.active_mut().ok_or_else(|| {
-            format!("会话创建失败：id={} 的会话不存在", session_id)
-        })?;
+        let session = manager
+            .active_mut()
+            .ok_or_else(|| format!("会话创建失败：id={} 的会话不存在", session_id))?;
         let mut capabilities = CapabilitySet::new();
         capabilities.insert(Capability::Render);
         let document_id = session.documents.create(DocumentKind::Pdf, capabilities);
@@ -165,7 +175,9 @@ pub fn new_session(state: tauri::State<'_, CoreState>) -> Result<SessionInfo, St
         };
 
         // 执行命令（Stage 1 空流程）。
-        command.execute(&context).map_err(|error| error.to_string())?;
+        command
+            .execute(&context)
+            .map_err(|error| error.to_string())?;
 
         // Command 产出 Task，TaskManager 统一提交：Capability Gate → Driver → EventBus。
         let tasks = command.build_tasks(&context);
@@ -317,7 +329,9 @@ pub fn open_document(
         };
 
         let command = OpenDocumentCommand::new(&path_buf);
-        command.execute(&context).map_err(|error| error.to_string())?;
+        command
+            .execute(&context)
+            .map_err(|error| error.to_string())?;
         let tasks = command.build_tasks(&context);
 
         let mut task_manager = lock(&state.task_manager);
@@ -351,10 +365,7 @@ pub fn open_document(
 
 /// 关闭文档：移除 Document 与页签。不产生 Diff，不进 History。
 #[tauri::command]
-pub fn close_document(
-    document_id: u64,
-    state: tauri::State<'_, CoreState>,
-) -> Result<(), String> {
+pub fn close_document(document_id: u64, state: tauri::State<'_, CoreState>) -> Result<(), String> {
     let mut manager = lock(&state.session_manager);
     let session = manager
         .active_mut()
@@ -490,7 +501,7 @@ pub fn driver_names(state: tauri::State<'_, CoreState>) -> Vec<String> {
 // Feature-02：页面编辑 IPC。IPC 只做组装与透传，不含业务判断。
 // ---------------------------------------------------------------------------
 
-use dw_core::diff::{Diff, DiffRef};
+use dw_core::diff::{Diff, DiffRef, StructureDiff};
 
 /// 单页旋转角：用于 IPC 返回页布局摘要。
 #[derive(Debug, Clone, Serialize)]
@@ -516,8 +527,10 @@ pub struct PageLayoutInfo {
     pub current_page: u32,
     /// 选中的页位置（Session.selection 真值）。
     pub selected_pages: Vec<u32>,
-    /// 本轮生成并暂存的 Diff 数量（History 归 16，不在此写入）。
+    /// 本轮写入 History 的 Diff 数量。
     pub diff_count: usize,
+    /// 文档是否有未保存修改（Workspace Dirty 投影）。
+    pub dirty: bool,
 }
 
 /// 由 Session + Document 组装页布局摘要；ViewModel 只读这份投影。
@@ -542,12 +555,11 @@ fn page_layout_info(
         current_page: session.workspace.view_state().current_page,
         selected_pages: session.selection.pages().to_vec(),
         diff_count: 0,
+        dirty: document.state() == dw_core::document::DocumentState::Modified,
     }
 }
 
 /// 把本轮 Diff 落盘，返回按执行顺序排列的引用（`02` §5.3）。
-///
-/// Feature-02 只产 `StructureDiff`；二进制 Diff 只有路径，直接登记引用。
 fn persist_diffs(diffs: Vec<Diff>, command_id: u64) -> Vec<DiffRef> {
     let directory = std::path::PathBuf::from("Recovery").join("diffs");
     let mut refs = Vec::new();
@@ -557,8 +569,7 @@ fn persist_diffs(diffs: Vec<Diff>, command_id: u64) -> Vec<DiffRef> {
                 let _ = std::fs::create_dir_all(&directory);
                 let name = format!("cmd{:03}-{}", command_id, index + 1);
                 let path = directory.join(&name);
-                if std::fs::write(&path, serde_json::to_vec(&structure).unwrap_or_default())
-                    .is_ok()
+                if std::fs::write(&path, serde_json::to_vec(&structure).unwrap_or_default()).is_ok()
                 {
                     refs.push(DiffRef(path.to_string_lossy().to_string()));
                 }
@@ -571,9 +582,28 @@ fn persist_diffs(diffs: Vec<Diff>, command_id: u64) -> Vec<DiffRef> {
     refs
 }
 
+/// 从磁盘读回一条 Diff：Undo / Redo 只回放 Diff，不重跑 Driver。
+fn load_diff(reference: &DiffRef) -> Result<Diff, String> {
+    let bytes =
+        std::fs::read(&reference.0).map_err(|error| format!("读取 Diff 失败：{}", error))?;
+    let structure: StructureDiff =
+        serde_json::from_slice(&bytes).map_err(|error| format!("解析 Diff 失败：{}", error))?;
+    Ok(Diff::Structure(structure))
+}
+
+/// 当前活动文档 id：History 记录不含 document_id，撤销时从 Workspace 解析。
+fn active_document_id(state: &tauri::State<'_, CoreState>) -> Result<DocumentId, String> {
+    let manager = lock(&state.session_manager);
+    let session = manager.active().ok_or_else(|| "没有活动会话".to_string())?;
+    session
+        .workspace
+        .view_state()
+        .active_document_id
+        .ok_or_else(|| "没有活动文档".to_string())
+}
+
 /// 运行一条页面编辑 Command 的固定骨架：
-/// 组装 Context → execute → build_tasks → Gate/ExecutionGraph → Task/Driver
-/// → 收口 Diff → 写 History → 返回布局摘要。
+/// Context → Command → Gate/ExecutionGraph/Task/Driver → Diff → **Commit（写 History）**。
 fn run_page_edit<C: Command>(
     document_id: u64,
     command: C,
@@ -583,8 +613,8 @@ fn run_page_edit<C: Command>(
 ) -> Result<PageLayoutInfo, String> {
     let id = DocumentId(document_id);
 
-    // 段1（不可变）：组装 Context 并执行完整链路，Diff 随结果一起带出。
-    let (layout, diff_count) = (|| -> Result<(PageLayoutInfo, usize), String> {
+    // 段1（不可变）：执行完整链路，Diff 随结果带出；事务失败时这里已返回错误。
+    let (layout, diffs) = (|| -> Result<(PageLayoutInfo, Vec<Diff>), String> {
         let manager = lock(&state.session_manager);
         let session = manager
             .active()
@@ -593,7 +623,6 @@ fn run_page_edit<C: Command>(
             .documents
             .get(id)
             .ok_or_else(|| "编辑失败：文档不存在".to_string())?;
-
         let context = ExecutionContext {
             session,
             document,
@@ -604,8 +633,9 @@ fn run_page_edit<C: Command>(
             progress: Progress::default(),
             cancel_token: CancelToken::default(),
         };
-
-        command.execute(&context).map_err(|error| error.to_string())?;
+        command
+            .execute(&context)
+            .map_err(|error| error.to_string())?;
         let tasks = command.build_tasks(&context);
         let mut task_manager = lock(&state.task_manager);
         let drivers = lock(&state.driver_manager);
@@ -617,22 +647,52 @@ fn run_page_edit<C: Command>(
                 dw_log::error("page-edit", &text);
                 text
             })?;
-        let diffs = task_manager.take_diffs();
-        // 15 的终点：Diff 已生成并暂存，不写 History（`02` §3.6 R5）。
-        // 用内容修订号命名，避免依赖 History.next_command_id()。
-        let diff_count = diffs.len();
-        if !diffs.is_empty() {
-            let _ = persist_diffs(diffs, document.revision());
-        }
-        events.publish(Event::document_modified(document_id, operation));
-        Ok((page_layout_info(id, session, document), diff_count))
+        Ok((
+            page_layout_info(id, session, document),
+            task_manager.take_diffs(),
+        ))
     })()?;
 
-    // 段2（可变）：校正当前页与选择集；不写 History（归 16）。
+    // 段2（可变）：Commit。全部 Task 成功才走到这里，才写 History。
     let mut manager = lock(&state.session_manager);
     let session = manager
         .active_mut()
         .ok_or_else(|| "编辑失败：没有活动会话".to_string())?;
+
+    // redo 分支截断：撤销后执行新命令时，丢弃其后的记录与对应 Diff 文件。
+    let truncated = session.history.truncate_redo();
+    for record in &truncated {
+        for reference in &record.diff_reference {
+            let _ = std::fs::remove_file(&reference.0);
+        }
+    }
+
+    let command_id = session.history.next_command_id();
+    let references = persist_diffs(diffs, command_id);
+    let mut recorded = false;
+    if command.records_history() {
+        session.history.record(CommandRecord {
+            command_id,
+            command_type: command.kind(),
+            params: command.params(),
+            diff_reference: references.clone(),
+            timestamp: now_millis(),
+            version: 1,
+        });
+        recorded = true;
+    }
+
+    // 每 100 条 Command 生成一次 Checkpoint（只加速恢复，不替代 History）。
+    let mut checkpointed = false;
+    if command_id % 100 == 0 {
+        if let Some(document) = session.documents.get(id) {
+            if let Ok(reference) = CheckpointStore::new(".").save(command_id, document) {
+                session.history.push_checkpoint(reference);
+                checkpointed = true;
+            }
+        }
+    }
+
     if !removed.is_empty() {
         session.selection.after_delete(removed);
     }
@@ -649,7 +709,27 @@ fn run_page_edit<C: Command>(
     result.page_count = count as usize;
     result.current_page = session.workspace.view_state().current_page;
     result.selected_pages = session.selection.pages().to_vec();
-    result.diff_count = diff_count;
+    result.diff_count = references.len();
+    if let Some(document) = session.documents.get(id) {
+        result.dirty = document.state() == dw_core::document::DocumentState::Modified;
+    }
+
+    let mut events = lock(&state.event_bus);
+    if !truncated.is_empty() {
+        events.publish(Event::history_truncated(command_id));
+    }
+    if recorded {
+        events.publish(Event::history_recorded(command_id));
+        dw_log::info(
+            "history",
+            &format!("已记录命令 {}（Diff {} 条）", command_id, references.len()),
+        );
+    }
+    if checkpointed {
+        events.publish(Event::checkpoint_created(command_id));
+        dw_log::info("history", &format!("已创建检查点：命令 {}", command_id));
+    }
+    events.publish(Event::document_modified(document_id, operation));
     Ok(result)
 }
 
@@ -784,4 +864,135 @@ pub fn get_page_layout(
         .get(DocumentId(document_id))
         .ok_or_else(|| "文档不存在".to_string())?;
     Ok(page_layout_info(DocumentId(document_id), session, document))
+}
+
+// ---------------------------------------------------------------------------
+// Feature-03：Undo / Redo。只回放 Diff，不重跑 Command / Task / Driver。
+// ---------------------------------------------------------------------------
+
+/// 按 Diff 引用顺序回放一条记录；`reverse=true` 为 Undo。
+fn replay_record(
+    record: &CommandRecord,
+    document: &dw_core::document::Document,
+    reverse: bool,
+) -> Result<(), String> {
+    for reference in &record.diff_reference {
+        let diff = load_diff(reference)?;
+        let result = if reverse {
+            diff.revert(document)
+        } else {
+            diff.apply(document)
+        };
+        result.map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+/// 撤销：History.current() → Diff.revert() → cursor-- → Workspace 刷新。
+#[tauri::command]
+pub fn undo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String> {
+    let id = active_document_id(&state)?;
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "撤销失败：没有活动会话".to_string())?;
+    let record = session
+        .history
+        .current()
+        .cloned()
+        .ok_or_else(|| "没有可撤销的命令".to_string())?;
+
+    {
+        let document = session
+            .documents
+            .get(id)
+            .ok_or_else(|| "撤销失败：文档不存在".to_string())?;
+        replay_record(&record, document, true)?;
+    }
+    session.history.undo();
+    clamp_workspace(session, id);
+
+    let document = session.documents.get(id).expect("文档刚回放过，必须存在");
+    let mut info = page_layout_info(id, session, document);
+    info.diff_count = 0;
+    let mut events = lock(&state.event_bus);
+    events.publish(Event::undo_executed(record.command_id));
+    dw_log::info("undo", &format!("已撤销命令 {}", record.command_id));
+    Ok(info)
+}
+
+/// 重做：History.current() → Diff.apply() → cursor++ → Workspace 刷新。
+#[tauri::command]
+pub fn redo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String> {
+    let id = active_document_id(&state)?;
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "重做失败：没有活动会话".to_string())?;
+    let index = session.history.cursor();
+    let record = session
+        .history
+        .entries()
+        .get(index)
+        .cloned()
+        .ok_or_else(|| "没有可重做的命令".to_string())?;
+
+    {
+        let document = session
+            .documents
+            .get(id)
+            .ok_or_else(|| "重做失败：文档不存在".to_string())?;
+        replay_record(&record, document, false)?;
+    }
+    session.history.redo();
+    clamp_workspace(session, id);
+
+    let document = session.documents.get(id).expect("文档刚回放过，必须存在");
+    let mut info = page_layout_info(id, session, document);
+    info.diff_count = 0;
+    let mut events = lock(&state.event_bus);
+    events.publish(Event::redo_executed(record.command_id));
+    dw_log::info("redo", &format!("已重做命令 {}", record.command_id));
+    Ok(info)
+}
+
+/// 撤销 / 重做后把 Workspace 的当前页夹到合法范围，并清掉失效选择。
+fn clamp_workspace(session: &mut dw_core::session::Session, id: DocumentId) {
+    let count = session
+        .documents
+        .get(id)
+        .map(|document| document.page_count())
+        .unwrap_or(1)
+        .max(1) as u32;
+    if session.workspace.view_state().current_page > count {
+        session.workspace.view_state_mut().current_page = count;
+    }
+    let valid: Vec<u32> = session
+        .selection
+        .pages()
+        .iter()
+        .copied()
+        .filter(|page| *page <= count)
+        .collect();
+    session.selection.replace(valid);
+}
+
+/// 是否可撤销：供工具栏按钮禁用态。
+#[tauri::command]
+pub fn can_undo(state: tauri::State<'_, CoreState>) -> bool {
+    let manager = lock(&state.session_manager);
+    manager
+        .active()
+        .map(|session| session.history.can_undo())
+        .unwrap_or(false)
+}
+
+/// 是否可重做：供工具栏按钮禁用态。
+#[tauri::command]
+pub fn can_redo(state: tauri::State<'_, CoreState>) -> bool {
+    let manager = lock(&state.session_manager);
+    manager
+        .active()
+        .map(|session| session.history.can_redo())
+        .unwrap_or(false)
 }

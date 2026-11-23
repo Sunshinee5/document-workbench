@@ -6,9 +6,7 @@
 use std::sync::Arc;
 
 use dw_core::capability::{Capability, CapabilitySet, HasCapability};
-use dw_core::command::{
-    Command, DeletePagesCommand, MovePagesCommand, RotatePagesCommand,
-};
+use dw_core::command::{Command, DeletePagesCommand, MovePagesCommand, RotatePagesCommand};
 use dw_core::context::{CancelToken, Config, ExecutionContext, Progress};
 use dw_core::diff::Diff;
 use dw_core::document::{DocumentId, DocumentKind, PageLayout};
@@ -71,6 +69,7 @@ fn run<C: Command>(
         params: command.params(),
         diff_reference: Vec::new(),
         timestamp: 0,
+        version: 1,
     };
     Ok((diffs, record))
 }
@@ -102,8 +101,8 @@ fn rotate_command_runs_full_chain_and_produces_one_diff() {
 #[test]
 fn delete_command_reorders_and_refuses_deleting_all() {
     let (session, id) = setup(5, true);
-    let (diffs, record) = run(&session, id, DeletePagesCommand::new(vec![1, 4]))
-        .expect("删除应成功");
+    let (diffs, record) =
+        run(&session, id, DeletePagesCommand::new(vec![1, 4])).expect("删除应成功");
     assert_eq!(diffs.len(), 1);
     match &diffs[0] {
         Diff::Structure(structure) => assert_eq!(structure.operation, "DeletePages"),
@@ -144,7 +143,11 @@ fn gate_rejects_edit_when_capability_not_declared() {
     let error = run(&session, id, RotatePagesCommand::new(vec![1], 90)).unwrap_err();
     match error {
         DwError::TaskRejected(reason) => {
-            assert!(reason.reason.contains("Edit"), "对外唯一出口是 TaskRejected：{}", reason.reason);
+            assert!(
+                reason.reason.contains("Edit"),
+                "对外唯一出口是 TaskRejected：{}",
+                reason.reason
+            );
         }
         other => panic!("期望 TaskRejected，实际 {}", other),
     }
@@ -239,7 +242,11 @@ fn transaction_rolls_back_all_completed_tasks_and_discards_diffs() {
     // 本轮 Diff 全部丢弃。
     assert!(task_manager.take_diffs().is_empty());
     // 事件名遵循冻结清单：成功用 TaskFinished，失败用 DriverError。
-    let kinds: Vec<&str> = events.events().iter().map(|event| event.kind.as_str()).collect();
+    let kinds: Vec<&str> = events
+        .events()
+        .iter()
+        .map(|event| event.kind.as_str())
+        .collect();
     assert!(kinds.contains(&"TaskFinished"));
     assert!(kinds.contains(&"DriverError"));
 }

@@ -38,13 +38,27 @@ export default function App() {
     console.error('PDF 渲染失败：', message);
   }, []);
 
-  // 快捷键：Ctrl+O 打开、Ctrl+= / Ctrl+- 缩放、PageUp / PageDown 翻页。
+  // 快捷键：Ctrl+O 打开、Ctrl+Z 撤销、Ctrl+Y / Ctrl+Shift+Z 重做、PageUp / PageDown 翻页。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey;
       if (modifier && event.key.toLowerCase() === 'o') {
         event.preventDefault();
         void viewModel.openFile();
+        return;
+      }
+      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+        event.preventDefault();
+        void viewModel.undo();
+        return;
+      }
+      if (
+        modifier &&
+        (event.key.toLowerCase() === 'y' ||
+          (event.key.toLowerCase() === 'z' && event.shiftKey))
+      ) {
+        event.preventDefault();
+        void viewModel.redo();
         return;
       }
       if (modifier && (event.key === '=' || event.key === '+')) {
@@ -99,6 +113,26 @@ export default function App() {
         >
           打开 PDF
         </button>
+        <span className="tool-divider" />
+        <button
+          className="tool-button"
+          type="button"
+          disabled={!hasDocument || !state.canUndo}
+          title="撤销（Ctrl+Z）"
+          onClick={() => void viewModel.undo()}
+        >
+          撤销
+        </button>
+        <button
+          className="tool-button"
+          type="button"
+          disabled={!hasDocument || !state.canRedo}
+          title="重做（Ctrl+Y）"
+          onClick={() => void viewModel.redo()}
+        >
+          重做
+        </button>
+        {state.dirty ? <span className="dirty-mark">未保存</span> : null}
         <span className="tool-divider" />
         <button
           className="tool-button"

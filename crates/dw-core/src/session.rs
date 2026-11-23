@@ -100,6 +100,9 @@ pub struct CommandRecord {
     pub diff_reference: Vec<DiffRef>,
     /// 记录时间戳（Unix 毫秒，不引入 chrono）。
     pub timestamp: u64,
+    /// History 记录格式版本（R1.1 新增，用于未来迁移）。
+    #[serde(default)]
+    pub version: u32,
 }
 
 /// History：Command 是语义真值源，Diff 是回放依据，Checkpoint 只用于加速恢复。
@@ -146,9 +149,7 @@ impl History {
     /// 记录一条命令：若 cursor 不在末尾（发生过 Undo），先截断 redo 分支。
     pub fn record(&mut self, record: CommandRecord) {
         // redo 分支截断：A → B → C，undo 到 B 后执行 D，则 C 被丢弃，变为 A → B → D。
-        if self.cursor < self.entries.len() {
-            self.entries.truncate(self.cursor);
-        }
+        let _ = self.truncate_redo();
         self.entries.push(record);
         self.cursor = self.entries.len();
         // 容量淘汰：从最旧记录开始丢弃，游标同步左移。
@@ -157,6 +158,23 @@ impl History {
             self.entries.drain(0..overflow);
             self.cursor = self.cursor.saturating_sub(overflow);
         }
+    }
+
+    /// 截断 redo 分支：A → B → C 撤销到 `AB|` 后调用，丢弃 C 并返回它。
+    ///
+    /// 调用方负责级联删除返回记录中的 Diff 文件（`00` §5）。
+    pub fn truncate_redo(&mut self) -> Vec<CommandRecord> {
+        if self.cursor >= self.entries.len() {
+            return Vec::new();
+        }
+        self.entries.split_off(self.cursor)
+    }
+
+    /// 当前待撤销的命令记录：`entries[cursor - 1]`。
+    pub fn current(&self) -> Option<&CommandRecord> {
+        self.cursor
+            .checked_sub(1)
+            .and_then(|index| self.entries.get(index))
     }
 
     /// 撤销：游标后移一位，返回被撤销的那条命令记录。

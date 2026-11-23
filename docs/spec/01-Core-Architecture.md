@@ -381,8 +381,14 @@ document.mutate(|inner| inner.revision += 1);
 | `WorkspaceChanged` | 持有 EventBus 的组装层 | 当前页 / 缩放 / 滚动 / 活动文档变化后 |
 | `TaskFinished` | `TaskManager` | Task 成功结束；失败发 `DriverError`，不发本事件 |
 | `DriverError` | `TaskManager` / 组装层 | Driver 返回归一化错误时 |
+| `HistoryRecorded` | 组装层 | Command 成功 Commit 并写入 History 后 |
+| `UndoExecuted` | 组装层 | `History.undo()` 且 Diff.revert() 成功后 |
+| `RedoExecuted` | 组装层 | `History.redo()` 且 Diff.apply() 成功后 |
+| `CheckpointCreated` | 组装层 | Checkpoint 落盘成功后 |
+| `RollbackCompleted` | `TaskManager` | 事务失败且补偿完成后 |
+| `HistoryTruncated` | 组装层 | redo 分支被新 Command 截断后 |
 
-> 2026-11-23 裁决：这 6 个事件名**永久冻结**，取代原先的 `TaskStarted` / `TaskProgress` / `TaskCompleted` / `CommandExecuted` / `DocumentChanged` / `HistoryChanged`。后续 Feature 直接复用，不另造事件名。
+> 2026-11-23 裁决：先冻结 6 个全局事件名，取代原先的 `TaskStarted` / `TaskProgress` / `TaskCompleted` / `CommandExecuted` / `DocumentChanged` / `HistoryChanged`；Feature-03 再显式冻结上表后 6 个 History 域事件名，共 12 个。后续 Feature 直接复用，不另造事件名。
 
 4. `Command` 与 `Document` **不知道 EventBus 存在**（`00` §5.8）；事件只能由持有方发布。
 5. 事件载荷只放可 JSON 表达的数据，不放 `&Document` 之类引用。
