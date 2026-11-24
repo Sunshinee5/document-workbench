@@ -4,19 +4,22 @@
 //! 属于 dw-desktop，不属于 dw-core；三个 Manager 与 EventBus 各只有一份，长生命周期由 Tauri State 持有。
 
 use std::path::PathBuf;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use dw_core::action::UserAction;
 use dw_core::capability::{Capability, CapabilitySet, HasCapability};
 use dw_core::checkpoint::CheckpointStore;
-use dw_core::command::{Command, NewSessionCommand, OpenDocumentCommand};
+use dw_core::command::{
+    Command, NewSessionCommand, OpenDocumentCommand, SaveAsCommand, SaveCommand,
+};
 use dw_core::context::{CancelToken, Config, ExecutionContext, Progress};
-use dw_core::document::{Document, DocumentId, DocumentKind};
-use dw_core::driver::DriverManager;
+use dw_core::document::{Document, DocumentId, DocumentKind, DocumentSaveState};
+use dw_core::driver::{DriverManager, SaveOutcome};
 use dw_core::eventbus::{Event, EventBus};
 use dw_core::lifecycle::IExecutable;
-use dw_core::session::{CommandRecord, SessionManager, SessionState};
+use dw_core::recovery::RecoveryStore;
+use dw_core::session::{CommandRecord, SavePoint, Session, SessionManager, SessionState};
 use dw_core::task::TaskManager;
 use serde::Serialize;
 
@@ -40,11 +43,33 @@ impl CoreState {
         drivers.register_empty_driver();
         // PDF 驱动：Stage 2 起提供元数据读取（lopdf），阅读渲染由 UI 的 PDF.js 负责。
         drivers.register(std::sync::Arc::new(dw_pdf::PdfDriver::new()));
+
+        // 启动检测：异常退出留下的 Recovery 记录保留，正常退出由窗口关闭钩子清理。
+        let mut events = EventBus::new();
+        let recovery = RecoveryStore::new(".");
+        match recovery.load_session() {
+            Ok(Some(info)) => {
+                let path = recovery.session_path();
+                events.publish(Event::recovery_loaded(&path.display().to_string()));
+                dw_log::warn(
+                    "recovery",
+                    &format!(
+                        "检测到未保存状态：{}（时间戳 {}，历史游标 {}，请确认是否需要恢复）",
+                        path.display(),
+                        info.timestamp,
+                        info.history_cursor
+                    ),
+                );
+            }
+            Ok(None) => {}
+            Err(error) => dw_log::warn("recovery", &format!("读取恢复记录失败：{}", error)),
+        }
+
         Self {
             session_manager: Mutex::new(SessionManager::new()),
             task_manager: Mutex::new(TaskManager::new()),
             driver_manager: Mutex::new(drivers),
-            event_bus: Mutex::new(EventBus::new()),
+            event_bus: Mutex::new(events),
         }
     }
 }
@@ -91,6 +116,8 @@ pub struct AppInfo {
     pub version: String,
     /// 当前阶段说明。
     pub edition: String,
+    /// 是否存在上次异常退出留下的恢复记录。
+    pub recovery_available: bool,
 }
 
 /// 会话信息：证明核心链路已经跑通一次空流程。
@@ -112,7 +139,8 @@ pub fn app_info() -> AppInfo {
     AppInfo {
         name: "文档工作台".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        edition: "Stage 1 内核".to_string(),
+        edition: "Stage 3 保存与恢复".to_string(),
+        recovery_available: RecoveryStore::new(".").exists(),
     }
 }
 
@@ -555,7 +583,7 @@ fn page_layout_info(
         current_page: session.workspace.view_state().current_page,
         selected_pages: session.selection.pages().to_vec(),
         diff_count: 0,
-        dirty: document.state() == dw_core::document::DocumentState::Modified,
+        dirty: document.save_state() == DocumentSaveState::Dirty,
     }
 }
 
@@ -655,6 +683,7 @@ fn run_page_edit<C: Command>(
 
     // 段2（可变）：Commit。全部 Task 成功才走到这里，才写 History。
     let mut manager = lock(&state.session_manager);
+    let session_id = manager.active_id().unwrap_or(0);
     let session = manager
         .active_mut()
         .ok_or_else(|| "编辑失败：没有活动会话".to_string())?;
@@ -711,10 +740,24 @@ fn run_page_edit<C: Command>(
     result.selected_pages = session.selection.pages().to_vec();
     result.diff_count = references.len();
     if let Some(document) = session.documents.get(id) {
-        result.dirty = document.state() == dw_core::document::DocumentState::Modified;
+        result.dirty = document.save_state() == DocumentSaveState::Dirty;
+    }
+
+    // 未保存状态摘要落盘：Recovery 不复制 PDF 正文，只记 Session / Workspace / History 引用。
+    let mut recovery_path = String::new();
+    let recovery = RecoveryStore::new(".");
+    match recovery.save_session(session_id, session) {
+        Ok(path) => {
+            recovery_path = path.display().to_string();
+            dw_log::info("recovery", &format!("已写入恢复记录：{}", recovery_path));
+        }
+        Err(error) => dw_log::warn("recovery", &format!("恢复记录写入失败：{}", error)),
     }
 
     let mut events = lock(&state.event_bus);
+    if !recovery_path.is_empty() {
+        events.publish(Event::recovery_created(&recovery_path));
+    }
     if !truncated.is_empty() {
         events.publish(Event::history_truncated(command_id));
     }
@@ -911,6 +954,7 @@ pub fn undo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String
     }
     session.history.undo();
     clamp_workspace(session, id);
+    sync_state_to_save_point(session, id);
 
     let document = session.documents.get(id).expect("文档刚回放过，必须存在");
     let mut info = page_layout_info(id, session, document);
@@ -946,6 +990,7 @@ pub fn redo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String
     }
     session.history.redo();
     clamp_workspace(session, id);
+    sync_state_to_save_point(session, id);
 
     let document = session.documents.get(id).expect("文档刚回放过，必须存在");
     let mut info = page_layout_info(id, session, document);
@@ -977,6 +1022,30 @@ fn clamp_workspace(session: &mut dw_core::session::Session, id: DocumentId) {
     session.selection.replace(valid);
 }
 
+/// Undo / Redo 后把状态同步到保存点：游标命中保存点即回落 Clean。
+///
+/// 说明：Diff 回放经 `set_page_layout()` 会递增内容修订号，因此不能以修订号相等作为
+/// 唯一判据；这里按文档17 裁决 5 的唯一判据 `history.cursor() == save_point.command_cursor` 执行。
+/// 未命中时保持 Diff 回放写入的 `DocumentSaveState::Dirty`。
+fn sync_state_to_save_point(session: &mut Session, id: DocumentId) {
+    let Some(save_point) = session.save_point.clone() else {
+        return;
+    };
+    if session.history.cursor() != save_point.command_cursor {
+        return;
+    }
+    if let Some(document) = session.documents.get(id) {
+        document.set_save_state(DocumentSaveState::Clean);
+        dw_log::info(
+            "save",
+            &format!(
+                "撤销/重做回到保存点：游标 {}，保存状态回落 Clean",
+                save_point.command_cursor
+            ),
+        );
+    }
+}
+
 /// 是否可撤销：供工具栏按钮禁用态。
 #[tauri::command]
 pub fn can_undo(state: tauri::State<'_, CoreState>) -> bool {
@@ -995,4 +1064,269 @@ pub fn can_redo(state: tauri::State<'_, CoreState>) -> bool {
         .active()
         .map(|session| session.history.can_redo())
         .unwrap_or(false)
+}
+
+// ---------------------------------------------------------------------------
+// Feature-04：Save / Save As。保存走完整执行链，但不写 History、不产生 Diff。
+// ---------------------------------------------------------------------------
+
+/// 保存结果：对应前端 `SaveInfo`，字段蛇形透传（`05` §2.4）。
+#[derive(Debug, Clone, Serialize)]
+pub struct SaveInfo {
+    /// 文档标识。
+    pub document_id: u64,
+    /// 实际写入路径。
+    pub path: String,
+    /// 保存后是否仍为脏状态。
+    pub dirty: bool,
+    /// 是否走了增量写（Driver 诚实报告）。
+    pub incremental: bool,
+    /// 写入字节数。
+    pub bytes_written: u64,
+    /// 写盘耗时（毫秒）。
+    pub elapsed_ms: u64,
+}
+
+/// 运行一条保存 Command 的固定骨架：
+/// Context → SaveCommand → Gate/ExecutionGraph/Task/Driver → **Commit（save_point）→ 事件**。
+///
+/// 与 `run_page_edit` 的区别：Save 不调用 `history.record()`、不落 Diff、不改 History。
+fn run_save(
+    document_id: u64,
+    target: PathBuf,
+    incremental: bool,
+    save_as: bool,
+    state: &tauri::State<'_, CoreState>,
+) -> Result<SaveInfo, String> {
+    let id = DocumentId(document_id);
+    let handle: Arc<Mutex<Option<SaveOutcome>>> = Arc::new(Mutex::new(None));
+
+    // 段1（不可变）：执行完整链路。Clean 的覆盖保存直接返回，不发 SaveStarted。
+    let executed = (|| -> Result<(Option<SaveOutcome>, bool), String> {
+        let manager = lock(&state.session_manager);
+        let session = manager
+            .active()
+            .ok_or_else(|| "保存失败：没有活动会话".to_string())?;
+        let document = session
+            .documents
+            .get(id)
+            .ok_or_else(|| "保存失败：文档不存在".to_string())?;
+        if !save_as && document.save_state() == DocumentSaveState::Clean {
+            dw_log::info(
+                "save",
+                &format!("文档已是 Clean，跳过写盘：{}", target.display()),
+            );
+            return Ok((None, true));
+        }
+
+        let context = ExecutionContext {
+            session,
+            document,
+            workspace: &session.workspace,
+            selection: &session.selection,
+            capability_set: document.capabilities(),
+            config: Config::default(),
+            progress: Progress::default(),
+            cancel_token: CancelToken::default(),
+        };
+        let command: Box<dyn Command> = if save_as {
+            Box::new(SaveAsCommand::with_outcome(
+                target.clone(),
+                incremental,
+                handle.clone(),
+            ))
+        } else {
+            Box::new(SaveCommand::with_outcome(
+                target.clone(),
+                incremental,
+                handle.clone(),
+            ))
+        };
+        command
+            .execute(&context)
+            .map_err(|error| error.to_string())?;
+        let tasks = command.build_tasks(&context);
+
+        let mut task_manager = lock(&state.task_manager);
+        let drivers = lock(&state.driver_manager);
+        let mut events = lock(&state.event_bus);
+        events.publish(Event::save_started(&target.display().to_string()));
+        if let Err(error) = task_manager.submit_all(tasks, &context, &drivers, &mut events) {
+            let text = error.to_string();
+            dw_log::error(
+                "save",
+                &format!("保存失败：{}（{}）", target.display(), text),
+            );
+            return Err(text);
+        }
+        // 锁中毒时取出内部值继续读：一次异常不应让 UI 永远拿不到结果。
+        let outcome = handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        Ok((outcome, false))
+    })();
+
+    let (outcome, skipped) = match executed {
+        Ok(value) => value,
+        Err(error) => {
+            // 段2（可变，失败收口）：事务已恢复 Document 快照，这里只置保存维度 Error 并发布 SaveFailed。
+            let mut manager = lock(&state.session_manager);
+            if let Some(session) = manager.active_mut() {
+                if let Some(document) = session.documents.get(id) {
+                    document.set_save_state(DocumentSaveState::Error);
+                }
+            }
+            drop(manager);
+            lock(&state.event_bus)
+                .publish(Event::save_failed(&target.display().to_string(), &error));
+            return Err(error);
+        }
+    };
+
+    if skipped {
+        let manager = lock(&state.session_manager);
+        let path = manager
+            .active()
+            .and_then(|session| session.documents.get(id))
+            .and_then(|document| document.source_path())
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| target.display().to_string());
+        return Ok(SaveInfo {
+            document_id,
+            path,
+            dirty: false,
+            incremental: false,
+            bytes_written: 0,
+            elapsed_ms: 0,
+        });
+    }
+
+    let bytes_written = outcome.as_ref().map(|item| item.bytes_written).unwrap_or(0);
+    let incremental = outcome
+        .as_ref()
+        .map(|item| item.incremental)
+        .unwrap_or(false);
+    let elapsed_ms = outcome.as_ref().map(|item| item.elapsed_ms).unwrap_or(0);
+    let final_path = outcome
+        .as_ref()
+        .map(|item| item.path.clone())
+        .unwrap_or_else(|| target.clone());
+
+    // 段2（可变）：Commit 保存点 / 页签标题 / 恢复摘要。Save 永不改 History。
+    let mut recovery_path = String::new();
+    let dirty = {
+        let mut manager = lock(&state.session_manager);
+        let session_id = manager.active_id().unwrap_or(0);
+        let session = manager
+            .active_mut()
+            .ok_or_else(|| "保存收口失败：没有活动会话".to_string())?;
+        let document = session
+            .documents
+            .get(id)
+            .ok_or_else(|| "保存收口失败：文档不存在".to_string())?;
+        session.save_point = Some(SavePoint {
+            command_cursor: session.history.cursor(),
+            revision: document.revision(),
+            path: final_path.clone(),
+        });
+        if save_as {
+            let title = final_path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("未命名")
+                .to_string();
+            session.workspace.rename_tab(id, title);
+        }
+        let dirty = document.save_state() == DocumentSaveState::Dirty;
+
+        let recovery = RecoveryStore::new(".");
+        match recovery.save_session(session_id, session) {
+            Ok(path) => recovery_path = path.display().to_string(),
+            Err(error) => dw_log::warn("recovery", &format!("恢复摘要写入失败：{}", error)),
+        }
+        dirty
+    };
+
+    let mut events = lock(&state.event_bus);
+    events.publish(Event::save_completed(
+        &final_path.display().to_string(),
+        bytes_written,
+        incremental,
+    ));
+    if !recovery_path.is_empty() {
+        events.publish(Event::recovery_created(&recovery_path));
+    }
+    let category = if save_as { "saveas" } else { "save" };
+    dw_log::info(
+        category,
+        &format!(
+            "保存成功：{} · {} 字节 · {} · {}ms",
+            final_path.display(),
+            bytes_written,
+            if incremental { "增量" } else { "全量" },
+            elapsed_ms
+        ),
+    );
+
+    Ok(SaveInfo {
+        document_id,
+        path: final_path.display().to_string(),
+        dirty,
+        incremental,
+        bytes_written,
+        elapsed_ms,
+    })
+}
+
+/// 保存文档：目标路径来自 Document.source_path，无源路径时用「另存为」指定。
+#[tauri::command]
+pub fn save_document(state: tauri::State<'_, CoreState>) -> Result<SaveInfo, String> {
+    let id = active_document_id(&state)?;
+    let target = {
+        let manager = lock(&state.session_manager);
+        let session = manager.active().ok_or_else(|| "没有活动会话".to_string())?;
+        session
+            .documents
+            .get(id)
+            .and_then(|document| document.source_path())
+            .ok_or_else(|| "文档没有源文件路径，请使用「另存为」指定目标".to_string())?
+    };
+    run_save(id.0, target, true, false, &state)
+}
+
+/// 另存为：写入新路径，成功后原 Document 保持打开并切换到新路径。
+#[tauri::command]
+pub fn save_as_document(
+    path: String,
+    state: tauri::State<'_, CoreState>,
+) -> Result<SaveInfo, String> {
+    let id = active_document_id(&state)?;
+    if path.trim().is_empty() {
+        return Err("另存为路径不能为空".to_string());
+    }
+    run_save(id.0, PathBuf::from(path), false, true, &state)
+}
+
+/// 是否可保存：有活动文档且处于 Dirty（`Modified`）。
+#[tauri::command]
+pub fn can_save(state: tauri::State<'_, CoreState>) -> bool {
+    let manager = lock(&state.session_manager);
+    let Some(session) = manager.active() else {
+        return false;
+    };
+    let Some(id) = session.workspace.view_state().active_document_id else {
+        return false;
+    };
+    session
+        .documents
+        .get(id)
+        .map(|document| document.save_state() == DocumentSaveState::Dirty)
+        .unwrap_or(false)
+}
+
+/// 活动文档是否脏：UI 标题栏 `*` 的唯一真值投影。
+#[tauri::command]
+pub fn is_dirty(state: tauri::State<'_, CoreState>) -> bool {
+    can_save(state)
 }

@@ -89,6 +89,43 @@ impl Event {
             format!("已截断重做分支：命令 {}", command_id),
         )
     }
+
+    /// `SaveStarted`：SaveTask 开始写盘前，由组装层发布。
+    pub fn save_started(path: &str) -> Self {
+        Self::new("SaveStarted", format!("开始保存：{}", path))
+    }
+
+    /// `SaveCompleted`：写盘成功且状态回落 `Ready` 后发布。
+    pub fn save_completed(path: &str, bytes_written: u64, incremental: bool) -> Self {
+        Self::new(
+            "SaveCompleted",
+            format!(
+                "保存完成：{} · {} 字节 · {}",
+                path,
+                bytes_written,
+                if incremental {
+                    "增量保存"
+                } else {
+                    "全量保存"
+                }
+            ),
+        )
+    }
+
+    /// `SaveFailed`：写盘失败，含归一化后的中文原因。
+    pub fn save_failed(path: &str, reason: &str) -> Self {
+        Self::new("SaveFailed", format!("保存失败：{}（{}）", path, reason))
+    }
+
+    /// `RecoveryCreated`：未保存状态落盘后发布。
+    pub fn recovery_created(path: &str) -> Self {
+        Self::new("RecoveryCreated", format!("已创建恢复记录：{}", path))
+    }
+
+    /// `RecoveryLoaded`：启动检测到恢复记录并加载后发布。
+    pub fn recovery_loaded(path: &str) -> Self {
+        Self::new("RecoveryLoaded", format!("已加载恢复记录：{}", path))
+    }
 }
 
 /// 事件总线：记录已发布事件，供 ViewModel 查询结果。

@@ -2,7 +2,10 @@
 //! 冻结约束：Driver 目录与 Runtime 分离；DriverManager 是唯一驱动管理者；统一使用 ExecutionContext。
 
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+use serde::{Deserialize, Serialize};
 
 use crate::capability::{Capability, CapabilitySet};
 use crate::context::ExecutionContext;
@@ -43,6 +46,54 @@ pub trait IPageEdit: Send + Sync {
     fn move_pages(&self, document: &Document, from: u32, to: u32) -> Result<(), DriverError>;
 }
 
+/// 一次保存的结果：供 Task 回写元数据、供 IPC 展示状态栏。
+///
+/// 所有第三方错误在 Driver 内归一化，这里只承载成功数据。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SaveOutcome {
+    /// 实际写入的文件路径。
+    pub path: PathBuf,
+    /// 实际写入字节数。
+    pub bytes_written: u64,
+    /// 是否走了增量写（Driver 必须诚实报告，不许虚报）。
+    pub incremental: bool,
+    /// 写盘耗时（毫秒）。
+    pub elapsed_ms: u64,
+}
+
+/// 保存能力接口：与 `IPageEdit` 同级，是 `IDriver` 的扩展点，不是新 Driver / 新层。
+///
+/// 策略由 Driver 判定：Task 只传 `incremental` 意图，不关心能否增量、也不调第三方。
+pub trait ISave: Send + Sync {
+    /// Persist Pipeline 的统一入口：把 Document 的内存变更同步到 PDF 对象模型（lopdf）。
+    ///
+    /// 覆盖旋转 `/Rotate`、页序 `/Kids`、删页 `/Count`，以及未来 18 的内容 / 批注变更。
+    /// SaveTask 必须先调用它，禁止跳过本入口直接写文件。
+    fn apply_changes(&self, document: &Document) -> Result<(), DriverError>;
+
+    /// 覆盖保存：默认写入 `document.source_path()`。
+    fn save(
+        &self,
+        document: &Document,
+        target: &Path,
+        incremental: bool,
+    ) -> Result<SaveOutcome, DriverError>;
+
+    /// 另存为：写入新路径，成功后由 Task 把新路径写回 Document。
+    fn save_as(
+        &self,
+        document: &Document,
+        target: &Path,
+        incremental: bool,
+    ) -> Result<SaveOutcome, DriverError>;
+
+    /// 当前文件是否具备增量保存条件；不具备时 Driver 记 WARN 后回退全量。
+    fn supports_incremental(&self, document: &Document) -> bool;
+
+    /// 全量重写：增量不可用时的回退路径，也是 Save As 的常规路径。
+    fn full_save(&self, document: &Document, target: &Path) -> Result<SaveOutcome, DriverError>;
+}
+
 pub trait IDriver: IExecutable + IHealthCheck + Send + Sync {
     /// 驱动名称。
     fn name(&self) -> &str;
@@ -50,6 +101,11 @@ pub trait IDriver: IExecutable + IHealthCheck + Send + Sync {
     fn capabilities(&self) -> CapabilitySet;
     /// 页编辑能力；不具备的驱动保持默认 `None`。
     fn page_editor(&self) -> Option<&dyn IPageEdit> {
+        None
+    }
+
+    /// 保存能力；不具备的驱动（如 `NullDriver`）保持默认 `None`。
+    fn save_provider(&self) -> Option<&dyn ISave> {
         None
     }
 }

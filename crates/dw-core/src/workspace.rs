@@ -90,6 +90,19 @@ impl Workspace {
         removed
     }
 
+    /// 重命名页签：Save As 成功后更新标题，不产生 Command、不进 History。
+    pub fn rename_tab(&mut self, document_id: DocumentId, title: impl Into<String>) -> bool {
+        let mut renamed = false;
+        for tab in &mut self.tabs {
+            if tab.document_id == document_id {
+                tab.title = title.into();
+                renamed = true;
+                break;
+            }
+        }
+        renamed
+    }
+
     /// 页签列表。
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs

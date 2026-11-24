@@ -16,6 +16,16 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         // 应用组装层：三个唯一 Manager 与唯一 EventBus 由 Tauri State 长生命周期持有。
         .manage(ipc::CoreState::new())
+        // 正常退出清理 Recovery；异常退出不会触发，记录保留到下次启动提示恢复。
+        .on_window_event(|_window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                let store = dw_core::recovery::RecoveryStore::new(".");
+                match store.clear() {
+                    Ok(()) => dw_log::info("recovery", "正常退出，已清理恢复记录"),
+                    Err(error) => dw_log::warn("recovery", &format!("清理恢复记录失败：{}", error)),
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             ipc::app_info,
             ipc::ping,
@@ -35,7 +45,11 @@ pub fn run() {
             ipc::undo,
             ipc::redo,
             ipc::can_undo,
-            ipc::can_redo
+            ipc::can_redo,
+            ipc::save_document,
+            ipc::save_as_document,
+            ipc::can_save,
+            ipc::is_dirty
         ])
         .run(tauri::generate_context!())
         .expect("文档工作台启动失败");

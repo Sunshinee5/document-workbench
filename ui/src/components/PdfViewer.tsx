@@ -66,6 +66,8 @@ interface PdfViewerProps {
   selectedPages: number[];
   /** 页结构版本：变化即强制重渲染，缩略图随之刷新。 */
   layoutRevision: number;
+  /** 保存版本：变化即重新读取文件字节，否则看不到写盘结果。 */
+  saveRevision: number;
   /** 点击页面写入 Session.selection。 */
   onSelectPage: (page: number, mode: 'replace' | 'toggle' | 'range') => void;
 }
@@ -173,6 +175,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     rotations,
     selectedPages,
     layoutRevision,
+    saveRevision,
     onSelectPage,
   },
   ref,
@@ -187,6 +190,8 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   const fittedWidthRef = useRef(0);
   /** 窗口尺寸变化时递增，触发重新自适应。 */
   const [resizeTick, setResizeTick] = useState(0);
+  /** 当前 PDF.js 加载任务：切换文档 / 保存后重新读字节时先销毁旧任务。 */
+  const loadingTaskRef = useRef<ReturnType<typeof getDocument> | null>(null);
 
   // 加载文档：拿字节 → PDF.js 解析 → 用第 1 页尺寸作为所有页的基准尺寸。
   useEffect(() => {
@@ -209,6 +214,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
           cMapPacked: true,
           standardFontDataUrl: STANDARD_FONT_URL,
         });
+        loadingTaskRef.current = task;
         const loaded = await task.promise;
         if (cancelled) {
           // 销毁要落在 loadingTask 上，PDFDocumentProxy 没有 destroy。
@@ -233,10 +239,13 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     })();
     return () => {
       cancelled = true;
+      // 保存成功后要用新字节重建 PDF.js 文档，旧任务必须先销毁以免 worker 泄漏。
+      void loadingTaskRef.current?.destroy();
+      loadingTaskRef.current = null;
     };
     // onError / onPageCount 由父组件用稳定引用传入，不参与依赖，避免重复加载。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [documentId]);
+  }, [documentId, saveRevision]);
 
   // 页面尺寸随缩放变化：占位高度必须同步，否则滚动定位会错。
   const pageWidth = Math.round(baseSize.width * BASE_SCALE * zoom);

@@ -265,12 +265,18 @@ Session       → crates/dw-core/src/session.rs
 | `Config` / `Progress` / `CancelToken` / `ExecutionContext`（8 字段） | `crates/dw-core/src/context.rs` | 已落地 |
 | `DiffRef` / `CheckpointRef` / `StructureDiff` / `BinaryDiff` / `Diff` | `crates/dw-core/src/diff.rs` | 已落地（零构造；生成方 = **Task**，见 `00` §5） |
 | `DocumentId` / `DocumentMetadata` / `DocumentInner` / `DocumentKind` / `DocumentState` / `Document` | `crates/dw-core/src/document.rs` | 已落地 |
-| `IDriver` / `DriverRegistry` / `DriverManager` / `NullDriver` / `EMPTY_DRIVER`（`pub const EMPTY_DRIVER: &str = "空驱动"`） | `crates/dw-core/src/driver.rs` | 已落地（`resolve -> Option<Arc<dyn IDriver>>` 为**最终形态**；`names()` 待补，见 `03` E10） |
+| `DocumentSaveState { Clean, Dirty, Saving, Error }` | `crates/dw-core/src/document.rs` | 已落地（Feature-04；与 `DocumentState` 正交，**无 `Saved`**，`DocumentState` 不改动） |
+| `IDriver` / `DriverRegistry` / `DriverManager` / `NullDriver` / `EMPTY_DRIVER`（`pub const EMPTY_DRIVER: &str = "空驱动"`） | `crates/dw-core/src/driver.rs` | 已落地（`resolve -> Option<Arc<dyn IDriver>>` 为**最终形态**；`names()` 已补，见 `03` E10） |
+| `ISave` / `SaveOutcome` / `IDriver::save_provider()` | `crates/dw-core/src/driver.rs` | 已落地（Feature-04；`apply_changes()` 是 Persist Pipeline 统一入口） |
+| `SaveCommand` / `SaveAsCommand` / `SaveTask` | `crates/dw-core/src/command.rs` / `crates/dw-core/src/task.rs` | 已落地（Feature-04；`records_history() = false`，不产 Diff） |
+| `PdfSaver`（增量 + 全量写盘） | `crates/dw-pdf/src/save.rs` | 已落地（Feature-04；`apply_changes()` 只改 lopdf 对象，写盘在 save/full_save） |
 | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | `crates/dw-core/src/error.rs` | 已落地（`capability_gate` 抛 `CapabilityNotSupported` 作**内部信号**，`TaskManager::submit` 转 `TaskRejected` 作**对外唯一出口**，见 `00` §4.4） |
 | `Event` / `EventBus` | `crates/dw-core/src/eventbus.rs` | 已落地 |
 | `IExecutable` / `IPausable` / `HealthStatus` / `IHealthCheck` | `crates/dw-core/src/lifecycle.rs` | 已落地 |
 | `Selection` | `crates/dw-core/src/selection.rs` | 已落地（空 struct，无字段） |
 | `SessionState` / `DocumentStore` / `CommandRecord` / `History` / `Session` / `SessionId` / `SessionManager` / `CheckpointStore` | `crates/dw-core/src/session.rs` | 已落地（Session 成员固定 6 项，含 `CheckpointStore`） |
+| `SavePoint` + `Session.save_point` | `crates/dw-core/src/session.rs` | 已落地（Feature-04） |
+| `RecoveryStore` / `SessionRecoveryInfo` | `crates/dw-core/src/recovery.rs` | 已落地（Feature-04；纯文件 I/O，不是第 4 个架构 Store、不进链） |
 | `Task` / `RotateTask` / `TaskManager` / `TaskNodeId` / `ExecutionGraph` | `crates/dw-core/src/task.rs` | 已落地 |
 | `Tab` / `Workspace` | `crates/dw-core/src/workspace.rs` | 已落地 |
 | `TabStore` | `crates/dw-core/src/workspace.rs` | 已落地（角色名 = `Workspace.tabs: Vec<Tab>`，**无独立类型**） |

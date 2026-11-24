@@ -813,6 +813,7 @@ name = "dw-pdf"
 version = "0.1.0"
 dependencies = [
  "dw-core",
+ "dw-log",
  "lopdf",
  "serde_json",
 ]

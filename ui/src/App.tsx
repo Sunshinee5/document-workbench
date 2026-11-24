@@ -47,6 +47,16 @@ export default function App() {
         void viewModel.openFile();
         return;
       }
+      // Ctrl+S 保存 / Ctrl+Shift+S 另存为：必须放在其他组合键之前，避免被重做分支吞掉。
+      if (modifier && event.key.toLowerCase() === 's') {
+        event.preventDefault();
+        if (event.shiftKey) {
+          void viewModel.saveAs();
+        } else {
+          void viewModel.save();
+        }
+        return;
+      }
       if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
         event.preventDefault();
         void viewModel.undo();
@@ -102,8 +112,40 @@ export default function App() {
     <div className="workbench">
       <header className="title-bar">
         <span className="title">{state.title}</span>
+        <span className="document-title">
+          {hasDocument ? `${state.activeTitle}${state.dirty ? ' *' : ''}` : '未打开文档'}
+        </span>
         <span className="edition">{state.edition}</span>
       </header>
+
+      {state.recoveryAvailable ? (
+        <div className="recovery-banner">
+          检测到上次异常退出留下的未保存状态；如需恢复请检查 Recovery/session.json 与 History 引用。
+        </div>
+      ) : null}
+
+      <details className="file-menu">
+        <summary>文件</summary>
+        <div className="file-menu-items">
+          <button type="button" onClick={() => void viewModel.openFile()}>
+            打开 PDF <span>Ctrl+O</span>
+          </button>
+          <button
+            type="button"
+            disabled={!hasDocument}
+            onClick={() => void viewModel.save()}
+          >
+            保存 <span>Ctrl+S</span>
+          </button>
+          <button
+            type="button"
+            disabled={!hasDocument}
+            onClick={() => void viewModel.saveAs()}
+          >
+            另存为… <span>Ctrl+Shift+S</span>
+          </button>
+        </div>
+      </details>
 
       <div className="tool-bar">
         <button
@@ -112,6 +154,24 @@ export default function App() {
           onClick={() => void viewModel.openFile()}
         >
           打开 PDF
+        </button>
+        <button
+          className="tool-button"
+          type="button"
+          disabled={!hasDocument}
+          title="保存（Ctrl+S）"
+          onClick={() => void viewModel.save()}
+        >
+          保存
+        </button>
+        <button
+          className="tool-button"
+          type="button"
+          disabled={!hasDocument}
+          title="另存为（Ctrl+Shift+S）"
+          onClick={() => void viewModel.saveAs()}
+        >
+          另存为…
         </button>
         <span className="tool-divider" />
         <button
@@ -354,6 +414,7 @@ export default function App() {
             rotations={state.rotations}
             selectedPages={state.selectedPages}
             layoutRevision={state.layoutRevision}
+            saveRevision={state.saveRevision}
             onSelectPage={(page, mode) => void viewModel.selectPages([page], mode)}
           />
         </main>
@@ -361,6 +422,7 @@ export default function App() {
 
       <footer className="status-bar">
         <span className="status-text">{state.status}</span>
+        {state.lastSavedAt ? <span className="task-event">已保存：{state.lastSavedAt}</span> : null}
         {state.taskEvent ? <span className="task-event">{state.taskEvent}</span> : null}
         {state.error ? <span className="status-error">{state.error}</span> : null}
       </footer>

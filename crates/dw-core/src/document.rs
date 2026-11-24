@@ -92,6 +92,8 @@ pub struct DocumentInner {
     pub metadata: DocumentMetadata,
     /// 页布局；驱动读完元数据后初始化，未初始化时为空。
     pub pages: PageLayout,
+    /// 保存状态：与 `state` 正交，是 dirty 的唯一真值源。
+    pub save_state: DocumentSaveState,
 }
 
 /// 文档种类标记：仅用于数据分类，不用于业务分支判断。
@@ -213,6 +215,37 @@ impl DocumentState {
     }
 }
 
+/// 保存状态：与 `DocumentState`（生命周期）**正交**的独立维度（文档17 裁决 1）。
+///
+/// `DocumentState` 描述「文档处于生命周期哪一段」（Created / Loading / Ready / Editing / …）；
+/// 本枚举只描述「内容是否被修改 / 是否正在保存」。禁止合并成一个枚举——合并后
+/// `Ready + Dirty`、`Editing + Saving` 这类组合无法表达。
+/// 没有 `Saved`：保存成功是瞬时事件（`SaveCompleted`），终态就是 `Clean`。
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DocumentSaveState {
+    /// 已保存 / 未修改（打开成功、保存成功、Undo 回到保存点）。
+    #[default]
+    Clean,
+    /// 有未保存修改（唯一 dirty 真值源）。
+    Dirty,
+    /// 正在写盘。
+    Saving,
+    /// 写盘失败（顶层错误仍是 `DwError::Driver`，这里只表达状态）。
+    Error,
+}
+
+impl DocumentSaveState {
+    /// 中文展示文案：供状态栏与日志使用，不参与业务判断。
+    pub fn label(self) -> &'static str {
+        match self {
+            DocumentSaveState::Clean => "已保存",
+            DocumentSaveState::Dirty => "未保存",
+            DocumentSaveState::Saving => "保存中",
+            DocumentSaveState::Error => "保存失败",
+        }
+    }
+}
+
 /// 统一文档对象：所有格式共用同一类型，格式差异通过能力集合表达。
 ///
 /// 注意：内含 `RwLock`，因此 Document 不可 `Clone`；需要共享时由 DocumentStore 按 id 提供引用。
@@ -240,6 +273,7 @@ impl Document {
                 state: DocumentState::Created,
                 metadata: DocumentMetadata::default(),
                 pages: PageLayout::default(),
+                save_state: DocumentSaveState::Clean,
             }),
         }
     }
@@ -266,9 +300,19 @@ impl Document {
         f(&mut guard)
     }
 
-    /// 当前状态（状态机的唯一读入口）。
+    /// 当前生命周期状态（状态机的唯一读入口）。
     pub fn state(&self) -> DocumentState {
         self.read(|inner| inner.state)
+    }
+
+    /// 当前保存状态：dirty / saving / error 的唯一读入口。
+    pub fn save_state(&self) -> DocumentSaveState {
+        self.read(|inner| inner.save_state)
+    }
+
+    /// 写入保存状态：唯一写入口是 `mutate()`，与生命周期状态互不干扰。
+    pub fn set_save_state(&self, state: DocumentSaveState) {
+        self.mutate(|inner| inner.save_state = state);
     }
 
     /// 内容修订号：页结构写回时递增，供 Diff 命名与事务快照比较使用。
@@ -322,13 +366,16 @@ impl Document {
 
     /// 写入页布局：Driver 修改页结构后的**唯一**写回口（经 `mutate()`）。
     ///
+    /// 两个正交维度同时推进：`save_state = Dirty`（dirty 唯一真值源），
+    /// `state = Editing`（生命周期进入编辑中）。**不再**把生命周期设为 `Modified`。
     /// Document 只存数据，不判断旋转角是否合法、不判断能否删空页——
     /// 这些校验属于 Driver / Task，不能下沉到数据对象。
     pub fn set_page_layout(&self, pages: PageLayout) {
         self.mutate(|inner| {
             inner.pages = pages;
             inner.revision += 1;
-            inner.state = DocumentState::Modified;
+            inner.state = DocumentState::Editing;
+            inner.save_state = DocumentSaveState::Dirty;
         });
     }
 
@@ -355,6 +402,9 @@ pub struct DocumentSnapshot {
     pub metadata: DocumentMetadata,
     /// 页布局快照。
     pub pages: PageLayout,
+    /// 保存状态快照：事务回滚必须同时恢复 dirty 真值源。
+    #[serde(default)]
+    pub save_state: DocumentSaveState,
 }
 
 impl Document {
@@ -365,6 +415,7 @@ impl Document {
             state: inner.state,
             metadata: inner.metadata.clone(),
             pages: inner.pages.clone(),
+            save_state: inner.save_state,
         })
     }
 
@@ -375,6 +426,7 @@ impl Document {
             inner.state = snapshot.state;
             inner.metadata = snapshot.metadata.clone();
             inner.pages = snapshot.pages.clone();
+            inner.save_state = snapshot.save_state;
         });
     }
 }

@@ -4,12 +4,14 @@
 
 use crate::capability::{capability_gate, Capability};
 use crate::diff::Diff;
-use crate::document::{DocumentSnapshot, DocumentState};
-use crate::driver::{DriverManager, IDriver, EMPTY_DRIVER, PDF_DRIVER};
+use crate::document::{DocumentSaveState, DocumentSnapshot, DocumentState};
+use crate::driver::{DriverManager, IDriver, SaveOutcome, EMPTY_DRIVER, PDF_DRIVER};
 use crate::error::{DwError, TaskRejected};
 use crate::eventbus::{Event, EventBus};
 use crate::lifecycle::{IExecutable, IPausable};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Task trait：统一执行器，入队前须经 Capability Gate 校验，执行时只调用 Driver。
 pub trait Task: IExecutable {
@@ -457,6 +459,211 @@ impl Task for MovePagesTask {
             .move_pages(context.document, self.from, self.to)
             .map_err(DwError::Driver)?;
         self.execute(context)
+    }
+}
+
+/// 保存任务：自持目标路径与增量意图，不产 Diff、不写 History。
+///
+/// 职责固定五项：脏检查 → 取最新 Document → 取 History 游标（由组装层写 save_point）
+/// → `Driver.apply_changes()` 同步 Document 到 lopdf → Driver 写盘 → 成功后回落 Clean。
+/// 增量还是全量**只由 Driver 判定**，本 Task 只传意图；禁止跳过 `apply_changes()` 直接写文件。
+#[derive(Debug, Clone)]
+pub struct SaveTask {
+    /// 目标文件路径（业务参数，不进 Context）。
+    target: PathBuf,
+    /// 调用方期望的保存方式；Driver 可自行降级为全量。
+    incremental: bool,
+    /// Clean 时是否跳过写盘：Save 跳过，Save As 必须写出新文件。
+    skip_if_clean: bool,
+    /// 保存结果：Task 只借用 `&self`，因此用 `Arc<Mutex>` 把结果带回组装层。
+    outcome: Arc<Mutex<Option<SaveOutcome>>>,
+}
+
+impl SaveTask {
+    /// 构造覆盖保存任务（Clean 时跳过写盘）。
+    pub fn new(target: impl Into<PathBuf>, incremental: bool) -> Self {
+        Self {
+            target: target.into(),
+            incremental,
+            skip_if_clean: true,
+            outcome: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// 构造另存为任务：即使文档 Clean 也必须写出目标文件。
+    pub fn new_save_as(target: impl Into<PathBuf>, incremental: bool) -> Self {
+        Self {
+            target: target.into(),
+            incremental,
+            skip_if_clean: false,
+            outcome: Arc::new(Mutex::new(None)),
+        }
+    }
+
+    /// 以外部结果句柄构造任务：Command 与 Task 共享同一份保存结果。
+    pub fn with_outcome(
+        target: impl Into<PathBuf>,
+        incremental: bool,
+        skip_if_clean: bool,
+        outcome: Arc<Mutex<Option<SaveOutcome>>>,
+    ) -> Self {
+        Self {
+            target: target.into(),
+            incremental,
+            skip_if_clean,
+            outcome,
+        }
+    }
+
+    /// 目标路径。
+    pub fn target(&self) -> &Path {
+        &self.target
+    }
+
+    /// 取回保存结果；未执行或被跳过时为 `None`。
+    pub fn outcome(&self) -> Option<SaveOutcome> {
+        // 锁中毒时取出内部值继续读：一次异常不应让调用方永远拿不到结果。
+        self.outcome
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 供 Command 持有的结果句柄：与 Task 共享同一份保存结果。
+    pub fn outcome_handle(&self) -> Arc<Mutex<Option<SaveOutcome>>> {
+        self.outcome.clone()
+    }
+}
+
+impl IExecutable for SaveTask {
+    /// 初始化：保存无需前置校验，路径合法性由 Driver 归一化。
+    fn initialize(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 直接执行入口：必须经 `execute_on` 注入 Driver，这里只保留生命周期签名。
+    fn execute(&self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 取消：写盘是短操作，不支持中途取消。
+    fn cancel(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 释放：无第三方句柄。
+    fn dispose(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl IPausable for SaveTask {
+    /// 暂停：保存不支持暂停。
+    fn pause(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 恢复：保存不支持暂停，恢复为空操作。
+    fn resume(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl Task for SaveTask {
+    /// 保存属于编辑能力：与页编辑共用 `Capability::Edit`，不新增 Capability 变体。
+    fn required_capability(&self) -> Capability {
+        Capability::Edit
+    }
+
+    /// 任务名称。
+    fn task_name(&self) -> &str {
+        "保存文档"
+    }
+
+    /// 保存由 PDF 驱动落地；策略判定在 Driver 内。
+    fn driver_name(&self) -> &str {
+        PDF_DRIVER
+    }
+
+    /// 保存不产生 Document Diff，因此 `diff()` 恒为 `None`。
+    fn diff(&self, _context: &crate::context::ExecutionContext<'_>) -> Option<Diff> {
+        None
+    }
+
+    /// 完整保存流程（Persist Pipeline）：
+    /// `save_state=Dirty → Saving → apply_changes() → lopdf → Driver 写盘 → Clean`。
+    ///
+    /// 失败时置 `DocumentSaveState::Error` 并抛出归一化的 `DwError::Driver`，
+    /// 由 `submit_all()` 做事务回滚；History 与 save_point 由组装层在成功后更新。
+    /// 生命周期 `DocumentState` 在本 Task 中不改——它与保存状态正交。
+    fn execute_on(
+        &self,
+        context: &crate::context::ExecutionContext<'_>,
+        driver: &dyn IDriver,
+    ) -> Result<(), DwError> {
+        let document = context.document;
+        if self.skip_if_clean && document.save_state() == DocumentSaveState::Clean {
+            dw_log::info(
+                "save",
+                &format!("文档已是 Clean，跳过写盘：{}", self.target.display()),
+            );
+            return Ok(());
+        }
+
+        let saver = driver
+            .save_provider()
+            .ok_or_else(|| DwError::Execution(format!("驱动 {} 不支持保存", driver.name())))?;
+
+        document.set_save_state(DocumentSaveState::Saving);
+        // Persist Pipeline：先把 Document 变更同步到 PDF 对象，再由 Driver 决定增量/全量。
+        if let Err(error) = saver.apply_changes(document) {
+            document.set_save_state(DocumentSaveState::Error);
+            dw_log::error(
+                "save",
+                &format!(
+                    "应用变更失败，不进入写盘：{}（{}）",
+                    self.target.display(),
+                    error.message
+                ),
+            );
+            return Err(DwError::Driver(error));
+        }
+
+        let result = if self.skip_if_clean {
+            saver.save(document, &self.target, self.incremental)
+        } else {
+            saver.save_as(document, &self.target, self.incremental)
+        };
+
+        match result {
+            Ok(outcome) => {
+                let now = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map(|duration| duration.as_millis() as u64)
+                    .unwrap_or(0);
+                document.mutate(|inner| {
+                    inner.metadata.source_path = Some(self.target.clone());
+                    inner.metadata.file_size = outcome.bytes_written;
+                    inner.metadata.modified_time = Some(now);
+                    inner.save_state = DocumentSaveState::Clean;
+                });
+                // 锁中毒时取出内部值继续写：结果丢失比永久失败更容易定位。
+                let mut guard = self
+                    .outcome
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *guard = Some(outcome);
+                Ok(())
+            }
+            Err(error) => {
+                document.set_save_state(DocumentSaveState::Error);
+                dw_log::error(
+                    "save",
+                    &format!("保存失败：{}（{}）", self.target.display(), error.message),
+                );
+                Err(DwError::Driver(error))
+            }
+        }
     }
 }
 

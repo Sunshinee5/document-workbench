@@ -15,6 +15,7 @@ pub mod driver;
 pub mod error;
 pub mod eventbus;
 pub mod lifecycle;
+pub mod recovery;
 pub mod selection;
 pub mod session;
 pub mod task;
@@ -56,6 +57,7 @@ mod skeleton_tests {
             history: History::new(),
             selection: Selection::default(),
             clipboard: Clipboard::default(),
+            save_point: None,
         };
         let document = Document::new(DocumentId(1), DocumentKind::Pdf, CapabilitySet::default());
         let context = ExecutionContext {

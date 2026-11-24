@@ -6,13 +6,15 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
 
 use crate::action::{Action, ActionSource};
 use crate::context::ExecutionContext;
+use crate::driver::SaveOutcome;
 use crate::error::DwError;
 use crate::lifecycle::IExecutable;
 use crate::task::{
-    DeletePagesTask, MovePagesTask, OpenDocumentTask, RotatePagesTask, RotateTask, Task,
+    DeletePagesTask, MovePagesTask, OpenDocumentTask, RotatePagesTask, RotateTask, SaveTask, Task,
 };
 
 /// 命令类型枚举：替代不可序列化的 trait object 身份，供 History 记录与重放选择。
@@ -32,6 +34,8 @@ pub enum CommandKind {
     Merge,
     /// 保存文档。
     Save,
+    /// 另存为（R1.1 新增；与 Save 共享 `SaveTask`，靠目标路径区分）。
+    SaveAs,
     /// 导出 Word。
     ExportWord,
 }
@@ -510,5 +514,210 @@ impl Command for MovePagesCommand {
 
     fn records_history(&self) -> bool {
         true
+    }
+}
+
+/// 保存命令：只表达「把当前文档写到目标路径」的意图。
+///
+/// 保存改变的是文件而非 Document 内容，不产生 Diff，因此 `records_history() = false`；
+/// 但它仍走完整执行链 `build_tasks() → Capability Gate → ExecutionGraph → Task → Driver`。
+#[derive(Debug, Clone)]
+pub struct SaveCommand {
+    /// 目标路径（由 IPC 从 Document.source_path 取得后传入）。
+    target: PathBuf,
+    /// 期望的保存方式；实际策略由 Driver 判定。
+    incremental: bool,
+    /// 与 SaveTask 共享的保存结果句柄。
+    outcome: Arc<Mutex<Option<SaveOutcome>>>,
+}
+
+impl SaveCommand {
+    /// 构造保存命令。
+    pub fn new(target: impl Into<PathBuf>, incremental: bool) -> Self {
+        Self::with_outcome(target, incremental, Arc::new(Mutex::new(None)))
+    }
+
+    /// 以外部结果句柄构造：组装层可在提交后直接读取保存结果。
+    pub fn with_outcome(
+        target: impl Into<PathBuf>,
+        incremental: bool,
+        outcome: Arc<Mutex<Option<SaveOutcome>>>,
+    ) -> Self {
+        Self {
+            target: target.into(),
+            incremental,
+            outcome,
+        }
+    }
+
+    /// 目标路径。
+    pub fn target(&self) -> &PathBuf {
+        &self.target
+    }
+
+    /// 保存结果；未执行时返回 `None`。
+    pub fn outcome(&self) -> Option<SaveOutcome> {
+        // 锁中毒时取出内部值继续读：一次异常不应让 UI 永远拿不到保存结果。
+        self.outcome
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+impl IExecutable for SaveCommand {
+    fn initialize(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn execute(&self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn cancel(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn dispose(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl Command for SaveCommand {
+    fn kind(&self) -> CommandKind {
+        CommandKind::Save
+    }
+
+    fn build_tasks(&self, _context: &crate::context::ExecutionContext<'_>) -> Vec<Box<dyn Task>> {
+        vec![Box::new(SaveTask::with_outcome(
+            self.target.clone(),
+            self.incremental,
+            true,
+            self.outcome.clone(),
+        ))]
+    }
+
+    /// 保存无内容变更，无反向 Diff 可应用。
+    fn undo(&mut self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 保存无内容变更，无 Diff 可重放。
+    fn redo(&mut self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "保存文档"
+    }
+
+    fn params(&self) -> Value {
+        serde_json::json!({ "path": self.target.to_string_lossy() })
+    }
+
+    /// 保存不产生 Document Diff，不入 History（文档17 裁决 4）。
+    fn records_history(&self) -> bool {
+        false
+    }
+}
+
+/// 另存为命令：与 SaveCommand 共享 SaveTask，靠任务自持的目标路径区分。
+#[derive(Debug, Clone)]
+pub struct SaveAsCommand {
+    /// 新目标路径。
+    target: PathBuf,
+    /// 期望的保存方式；另存为新文件通常由 Driver 判定走全量。
+    incremental: bool,
+    /// 与 SaveTask 共享的保存结果句柄。
+    outcome: Arc<Mutex<Option<SaveOutcome>>>,
+}
+
+impl SaveAsCommand {
+    /// 构造另存为命令。
+    pub fn new(target: impl Into<PathBuf>, incremental: bool) -> Self {
+        Self::with_outcome(target, incremental, Arc::new(Mutex::new(None)))
+    }
+
+    /// 以外部结果句柄构造：组装层可在提交后直接读取保存结果。
+    pub fn with_outcome(
+        target: impl Into<PathBuf>,
+        incremental: bool,
+        outcome: Arc<Mutex<Option<SaveOutcome>>>,
+    ) -> Self {
+        Self {
+            target: target.into(),
+            incremental,
+            outcome,
+        }
+    }
+
+    /// 目标路径。
+    pub fn target(&self) -> &PathBuf {
+        &self.target
+    }
+
+    /// 保存结果；未执行时返回 `None`。
+    pub fn outcome(&self) -> Option<SaveOutcome> {
+        // 锁中毒时取出内部值继续读：一次异常不应让 UI 永远拿不到保存结果。
+        self.outcome
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+}
+
+impl IExecutable for SaveAsCommand {
+    fn initialize(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn execute(&self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn cancel(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn dispose(&mut self) -> Result<(), DwError> {
+        Ok(())
+    }
+}
+
+impl Command for SaveAsCommand {
+    fn kind(&self) -> CommandKind {
+        CommandKind::SaveAs
+    }
+
+    fn build_tasks(&self, _context: &crate::context::ExecutionContext<'_>) -> Vec<Box<dyn Task>> {
+        vec![Box::new(SaveTask::with_outcome(
+            self.target.clone(),
+            self.incremental,
+            false,
+            self.outcome.clone(),
+        ))]
+    }
+
+    /// 另存为无内容变更，无反向 Diff 可应用。
+    fn undo(&mut self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    /// 另存为无内容变更，无 Diff 可重放。
+    fn redo(&mut self, _context: &crate::context::ExecutionContext<'_>) -> Result<(), DwError> {
+        Ok(())
+    }
+
+    fn description(&self) -> &str {
+        "另存为"
+    }
+
+    fn params(&self) -> Value {
+        serde_json::json!({ "path": self.target.to_string_lossy() })
+    }
+
+    /// 另存为不产生 Document Diff，不入 History（文档17 裁决 4）。
+    fn records_history(&self) -> bool {
+        false
     }
 }

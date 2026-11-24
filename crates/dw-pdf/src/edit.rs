@@ -154,6 +154,38 @@ pub fn initial_layout(page_count: usize) -> PageLayout {
     PageLayout::from_count(page_count)
 }
 
+/// 从已解析的 PDF 构造初始布局，保留文件自带的 `/Rotate` 绝对角度。
+///
+/// 为什么必须读原值：`PageLayout.rotations` 在保存时按**绝对角度**写入 `/Rotate`，
+/// 若初始化时忽略原文件的旋转角，第一次保存就会把原有旋转清掉。
+/// 读不到 / 类型不对 / 非 90 倍数一律按 0 处理，不让元数据问题阻断打开。
+pub fn initial_layout_from_pdf(pdf: &lopdf::Document) -> PageLayout {
+    let pages = pdf.get_pages();
+    let mut layout = PageLayout::from_count(pages.len());
+    for (number, object_id) in &pages {
+        let Ok(dictionary) = pdf.get_dictionary(*object_id) else {
+            continue;
+        };
+        let Ok(value) = dictionary.get(b"Rotate") else {
+            continue;
+        };
+        let Ok((_, resolved)) = pdf.dereference(value) else {
+            continue;
+        };
+        let Ok(degrees) = resolved.as_i64() else {
+            continue;
+        };
+        if degrees % 90 != 0 {
+            continue;
+        }
+        let normalized = degrees.rem_euclid(360);
+        if normalized != 0 {
+            layout.rotations.insert(*number, normalized as i32);
+        }
+    }
+    layout
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

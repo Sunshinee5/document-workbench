@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          6 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          7 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -22,10 +22,11 @@ docs/
 | `features/14-Feature-01-PDF-Viewer.md` | 打开 PDF → 看第一页 → 滚动 → 缩放 → 跳页 → 多标签 → 最近文件。含 Prerequisite 与 Dependency | ✅ 已实现 2026-11-23 |
 | `features/16-Feature-03-History-Undo-Redo.md` | 撤销 / 重做 / Cursor / Transaction / Checkpoint；含 Implementation Order 与 Failure Policy | 已实现 2026-11-23 |
 | `features/15-Feature-02-Page-Editing.md` | 旋转 / 删除 / 移动页面、多选、Diff 生成。含 Prerequisite、Dependency、**Implementation Order** 与 **Failure Policy** | 已实现 2026-11-23（History / Undo 归 16） |
+| `features/17-Feature-04-Save-Recovery.md` | Save / Save As / Dirty / Incremental Save / Crash Recovery；含 10 条裁决、Implementation Order、Failure Policy | 待实现（本次） |
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 六份规范
+## 七份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|
@@ -35,6 +36,7 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
 | `spec/03-Driver-Specification.md` | Driver：IDriver / DriverManager / PDF 四拆分 / OCR / Office / 错误分类 / 配置 / 并发 | 接第三方库时 |
 | `spec/04-Stage-Roadmap.md` | 开发顺序：Stage 1–5 的完成项、验收标准、7 项收口产出、命令基线、绿色版标准 | 开工或收口时 |
 | `spec/05-Coding-Convention.md` | 编码规范：21 条禁令、命名规则、Rust 规范、代码驱动四问、Rust Mapping 要求、自检清单、**附录 A 架构兼容性检查** | **每天写代码时** |
+| `spec/06-Testing-and-Acceptance-R1.1.md` | 测试与验收规范：六层金字塔、Failure / Boundary / Transaction / Recovery、Release Report、**三 Gate**、Agent 提交规范 | 每个 Feature 开发完与合并前 |
 
 ## 指南（无规范权）
 
@@ -62,7 +64,8 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
   > 01/02/03 Core Spec
   > 04 Stage Roadmap
   > 05 Coding Convention
-  > 06~12 Implementation Spec / features/（无架构裁定权）
+  > 06 Testing & Acceptance（测试流程规范，不改架构）
+  > 07~12 Implementation Spec / features/（无架构裁定权）
   > 13+ Implementation Guide / guides/（无规范权）
   > records/（仅溯源）> archive/（全部作废）
 ```

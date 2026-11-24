@@ -514,6 +514,9 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | Checkpoint | 加速恢复的完整快照 | `CheckpointStore`（每 100 条） | 会话关闭或容量淘汰 | `CheckpointStore`（磁盘优先） | `diff.rs`：`CheckpointRef` + `session.rs`：`CheckpointStore` | 随会话 |
 | Document | 统一文档对象（多态靠能力集） | `DocumentStore::create()` | `DocumentStore::remove()` | `DocumentStore` | `document.rs`：`Document` / `DocumentKind` / `DocumentState` | 随 Session |
 | DocumentInner | 文档可变内容 | `Document::new()` | Document 销毁 | `Document.inner: RwLock` | `document.rs`：`DocumentInner` | 随 Document |
+| DocumentSaveState | 保存状态（与 `DocumentState` 生命周期正交；文档17 用户裁决 1） | `Document::new()` 默认 `Clean` | Document 销毁 | `Document.inner.save_state` | `document.rs`：`DocumentSaveState { Clean, Dirty, Saving, Error }`（无 `Saved`） | 随 Document |
+| SavePoint | 保存点，Undo/Redo 命中即回落 Clean | `run_save()` 保存成功后 | 下次 Save 覆盖 | `Session.save_point: Option<SavePoint>` | `session.rs`：`SavePoint { command_cursor, revision, path }` | 随 Session |
+| RecoveryStore | Recovery 摘要落盘（纯文件 I/O，不持有 Document/History、不进链；R1.1 Architecture Gate 放行） | 组装层 / IPC 按需 `new(".")` | 正常退出清理 | 无长期持有 | `recovery.rs`：`RecoveryStore` / `SessionRecoveryInfo` | 随调用，数据留 `Recovery/` |
 | Selection | 用户选中对象 | `Session::create()` | Session 销毁 | `Session` | `selection.rs`：`Selection` | 随 Session |
 | Clipboard | 剪贴板 | `Session::create()` | Session 销毁 | `Session` | `clipboard.rs`：`Clipboard` | 随 Session |
 | EventBus | 横切事件发布，UI 只监听 | 组装层（`CoreState`） | 进程退出 | `CoreState` | `eventbus.rs`：`EventBus` / `Event` | 进程级 |
@@ -548,6 +551,11 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | ViewState | `crates/dw-core/src/workspace.rs` | `ViewState { current_page, zoom, scroll_position, active_document_id }` | 已落地 |
 | Document | `crates/dw-core/src/document.rs` | `Document` / `DocumentId` / `DocumentKind` / `DocumentState` / `DocumentMetadata` | 已落地 |
 | DocumentInner | `crates/dw-core/src/document.rs` | `DocumentInner`（`RwLock` 内） | 已落地 |
+| DocumentSaveState | `crates/dw-core/src/document.rs` | `DocumentSaveState { Clean, Dirty, Saving, Error }`（无 `Saved`） | 已落地（Feature-04；`DocumentState` 不改动） |
+| SavePoint | `crates/dw-core/src/session.rs` | `SavePoint { command_cursor, revision, path }` + `Session.save_point` | 已落地（Feature-04） |
+| RecoveryStore | `crates/dw-core/src/recovery.rs` | `RecoveryStore` / `SessionRecoveryInfo` | 已落地（Feature-04；纯文件 I/O，非第 4 个架构 Store） |
+| 保存接口 | `crates/dw-core/src/driver.rs` / `crates/dw-pdf/src/save.rs` | `ISave::apply_changes()` / `save` / `save_as` / `supports_incremental` / `full_save` / `SaveOutcome` / `PdfSaver` | 已落地（Feature-04 Persist Pipeline） |
+| SaveCommand / SaveAsCommand / SaveTask | `crates/dw-core/src/command.rs` / `crates/dw-core/src/task.rs` | `SaveCommand` / `SaveAsCommand` / `SaveTask` / `CommandKind::SaveAs` | 已落地（Feature-04；`records_history() = false`） |
 | Diff | `crates/dw-core/src/diff.rs` | `Diff` / `StructureDiff` / `BinaryDiff` / `DiffRef` / `CheckpointRef` / `RotationDiff` / `DeletePageDiff` / `MovePageDiff` | 已落地（Feature-02 起由 Task 构造） |
 | Selection | `crates/dw-core/src/selection.rs` | `Selection` | 已落地 |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |

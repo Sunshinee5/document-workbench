@@ -6,6 +6,7 @@
 //! 其中 DocumentStore 与 History 都是 Session 内部存储与状态组件，不是 Manager、不是新层。
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -234,6 +235,21 @@ impl Default for History {
     }
 }
 
+/// 保存点：保存成功时记录的历史游标 / 内容修订号 / 目标路径。
+///
+/// 它是 Session 的**普通数据字段**，不是第二个状态真值源，也不进 History。
+/// Undo / Redo 后若 `history.cursor()` 与 `revision` 同时命中保存点，
+/// 文档状态回落 `Ready`（Clean）；否则继续保持 `Modified`（Dirty）。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SavePoint {
+    /// 保存时的 History 游标。
+    pub command_cursor: usize,
+    /// 保存时的 Document 内容修订号。
+    pub revision: u64,
+    /// 保存目标路径。
+    pub path: PathBuf,
+}
+
 /// 会话：仅保存状态，不处理任何业务。
 ///
 /// 注意：DocumentStore 内含 Document（Document 内含 RwLock），因此 Session 不可 `Clone`，
@@ -252,6 +268,8 @@ pub struct Session {
     pub selection: Selection,
     /// 当前剪贴板。
     pub clipboard: Clipboard,
+    /// 最近一次成功保存的保存点；未保存过为 `None`。
+    pub save_point: Option<SavePoint>,
 }
 
 impl Session {
@@ -264,6 +282,7 @@ impl Session {
             history: History::new(),
             selection: Selection::default(),
             clipboard: Clipboard::default(),
+            save_point: None,
         }
     }
 

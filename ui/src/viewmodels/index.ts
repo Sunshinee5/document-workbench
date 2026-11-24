@@ -17,8 +17,12 @@ import {
   movePages,
   redo,
   rotatePages,
+  pickSavePath,
+  saveAsDocument,
+  saveDocument,
   setPageSelection,
   undo,
+  type SaveInfo,
   setViewState,
   type AppInfo,
   type DocumentInfo,
@@ -73,6 +77,12 @@ export interface WorkbenchState {
   canRedo: boolean;
   /** 文档是否有未保存修改 */
   dirty: boolean;
+  /** 保存次数：变化即让查看器重新读取文件字节 */
+  saveRevision: number;
+  /** 最近一次保存时间（HH:MM），用于状态栏展示 */
+  lastSavedAt: string;
+  /** 上次异常退出是否留下恢复记录 */
+  recoveryAvailable: boolean;
 }
 
 /** 缩放档位：产品只给有限档，避免自由输入造成视图抖动。 */
@@ -102,6 +112,9 @@ export class WorkbenchViewModel {
     canUndo: false,
     canRedo: false,
     dirty: false,
+    saveRevision: 0,
+    lastSavedAt: '',
+    recoveryAvailable: false,
   };
 
   private listeners: Array<() => void> = [];
@@ -110,6 +123,11 @@ export class WorkbenchViewModel {
   private viewStateTimer: number | null = null;
 
   private pendingViewState: { page: number; zoom: number; scroll: number } | null = null;
+
+  /** 是否有未保存修改：标题栏 `*` 与菜单禁用态的唯一前端投影。 */
+  get isDirty(): boolean {
+    return this.stateValue.dirty;
+  }
 
   /** 当前状态快照：供 React 触发重渲染。 */
   get snapshot(): WorkbenchState {
@@ -138,7 +156,10 @@ export class WorkbenchViewModel {
       title: info.name,
       version: info.version,
       edition: info.edition,
-      status: `就绪 · ${info.name} ${info.version}`,
+      recoveryAvailable: info.recovery_available,
+      status: info.recovery_available
+        ? `检测到上次未保存状态，请确认是否需要恢复 · ${info.name} ${info.version}`
+        : `就绪 · ${info.name} ${info.version}`,
     });
     await this.refreshTabs();
     await this.refreshHistoryState();
@@ -467,6 +488,62 @@ export class WorkbenchViewModel {
     }
   }
 
+  // ---- Feature-04：保存 / 另存为。真值在后端 save_point 与 DocumentState。 ----
+
+  /** 保存当前文档：Clean 时后端直接跳过写盘，不发 SaveStarted。 */
+  async save(): Promise<void> {
+    if (this.stateValue.activeDocumentId === null) {
+      return;
+    }
+    this.update({ error: '', status: '正在保存…' });
+    try {
+      this.applySaveInfo(await saveDocument());
+    } catch (error) {
+      const text = messageOf(error);
+      this.update({ error: text, status: `保存失败：${text}` });
+    }
+  }
+
+  /** 另存为：先走原生路径对话框，再把路径交给 SaveAsCommand。 */
+  async saveAs(): Promise<void> {
+    if (this.stateValue.activeDocumentId === null) {
+      return;
+    }
+    this.update({ error: '' });
+    try {
+      const path = await pickSavePath(this.stateValue.activeTitle || undefined);
+      if (!path) {
+        this.update({ status: '已取消另存为' });
+        return;
+      }
+      this.update({ status: '正在另存为…' });
+      const info = await saveAsDocument(path);
+      this.applySaveInfo(info);
+      // 页签标题真值在 Workspace.tabs，保存后刷新投影。
+      await this.refreshTabs();
+      const title = fileNameOf(info.path);
+      this.update({ activeTitle: title });
+    } catch (error) {
+      const text = messageOf(error);
+      this.update({ error: text, status: `另存为失败：${text}` });
+    }
+  }
+
+  /** 把后端 SaveInfo 投影到界面：清脏、版本号递增（触发 PDF.js 重新读字节）。 */
+  private applySaveInfo(info: SaveInfo): void {
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+    this.update({
+      dirty: info.dirty,
+      error: '',
+      lastSavedAt: time,
+      saveRevision: this.stateValue.saveRevision + 1,
+      layoutRevision: this.stateValue.layoutRevision + 1,
+      status: `已保存：${time}`,
+      taskEvent: `${info.incremental ? '增量保存' : '全量保存'} · ${formatSize(info.bytes_written)} · ${info.elapsed_ms}ms`,
+    });
+  }
+
   /** 清空错误提示。 */
   clearError(): void {
     this.update({ error: '' });
@@ -476,6 +553,12 @@ export class WorkbenchViewModel {
 /** 把异常统一转成可展示的中文文案。 */
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/** 从完整路径取文件名：Save As 后页签标题用。 */
+function fileNameOf(path: string): string {
+  const parts = path.split(/[\\/]/);
+  return parts[parts.length - 1] || path;
 }
 
 /** 字节数转可读大小。 */

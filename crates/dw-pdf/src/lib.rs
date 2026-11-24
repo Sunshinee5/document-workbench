@@ -11,12 +11,15 @@ pub mod metadata;
 
 use dw_core::capability::{Capability, CapabilitySet};
 use dw_core::context::ExecutionContext;
-use dw_core::driver::{IDriver, IPageEdit};
+use dw_core::driver::{IDriver, IPageEdit, ISave};
 use dw_core::error::DwError;
 use dw_core::lifecycle::{HealthStatus, IExecutable, IHealthCheck};
 
 use edit::PdfPageEditor;
 use metadata::{LopdfAdapter, PdfMetadata};
+use save::PdfSaver;
+
+pub mod save;
 
 /// PDF 驱动：`IDriver` 的唯一实现，内部按能力转调各适配器。
 ///
@@ -28,6 +31,8 @@ pub struct PdfDriver {
     adapter: LopdfAdapter,
     /// 页编辑适配器：Feature-02 的旋转 / 删除 / 移动。
     editor: PdfPageEditor,
+    /// 保存适配器：Feature-04 的增量 / 全量写盘。
+    saver: PdfSaver,
 }
 
 impl PdfDriver {
@@ -36,6 +41,7 @@ impl PdfDriver {
         Self {
             adapter: LopdfAdapter::default(),
             editor: PdfPageEditor::new(),
+            saver: PdfSaver::new(),
         }
     }
 }
@@ -59,9 +65,14 @@ impl IExecutable for PdfDriver {
         // 页布局在这里初始化一次；后续编辑由 Feature-02 的 IPageEdit 写回。
         // 打开流程每次只执行一次，因此不会覆盖用户已做的编辑。
         if context.document.page_layout().is_empty() {
-            context
+            // 页布局的旋转角是绝对值：必须带上原文件的 /Rotate，否则首次保存会清掉原旋转。
+            let layout = context
                 .document
-                .initialize_page_layout(edit::initial_layout(metadata.page_count));
+                .source_path()
+                .and_then(|path| lopdf::Document::load(path).ok())
+                .map(|pdf| edit::initial_layout_from_pdf(&pdf))
+                .unwrap_or_else(|| edit::initial_layout(metadata.page_count));
+            context.document.initialize_page_layout(layout);
         }
         Ok(())
     }
@@ -114,5 +125,10 @@ impl IDriver for PdfDriver {
     /// 页编辑能力：`Feature-02` 的 Task 经此调用 Driver，不直接改 Document。
     fn page_editor(&self) -> Option<&dyn IPageEdit> {
         Some(&self.editor)
+    }
+
+    /// 保存能力：由 `PdfSaver` 落地，策略判定与错误归一化都在其中完成。
+    fn save_provider(&self) -> Option<&dyn ISave> {
+        Some(&self.saver)
     }
 }

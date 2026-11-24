@@ -19,6 +19,8 @@ export interface AppInfo {
   name: string;
   version: string;
   edition: string;
+  /** 上次异常退出是否留下恢复记录 */
+  recovery_available: boolean;
 }
 
 /** 会话信息：对应后端 SessionInfo。 */
@@ -64,7 +66,12 @@ export async function appInfo(): Promise<AppInfo> {
   try {
     return await invoke<AppInfo>('app_info');
   } catch {
-    return { name: '文档工作台', version: '0.1.0', edition: 'Stage 2 预览' };
+    return {
+      name: '文档工作台',
+      version: '0.1.0',
+      edition: 'Stage 3 预览',
+      recovery_available: false,
+    };
   }
 }
 
@@ -235,4 +242,46 @@ export async function canUndo(): Promise<boolean> {
 /** 是否可重做：工具栏禁用态。 */
 export async function canRedo(): Promise<boolean> {
   return invoke<boolean>('can_redo');
+}
+
+/** 保存结果：对应后端 SaveInfo；蛇形字段直接透传，不改驼峰。 */
+export interface SaveInfo {
+  document_id: number;
+  path: string;
+  dirty: boolean;
+  incremental: boolean;
+  bytes_written: number;
+  elapsed_ms: number;
+}
+
+/** 保存当前文档：目标路径取自后端 Document.source_path。 */
+export async function saveDocument(): Promise<SaveInfo> {
+  return invoke<SaveInfo>('save_document');
+}
+
+/** 另存为：目标路径由原生对话框给出。 */
+export async function saveAsDocument(path: string): Promise<SaveInfo> {
+  return invoke<SaveInfo>('save_as_document', { path });
+}
+
+/** 是否可保存：有活动文档且处于 Dirty。 */
+export async function canSave(): Promise<boolean> {
+  return invoke<boolean>('can_save');
+}
+
+/** 活动文档是否脏：标题栏 `*` 的唯一真值投影。 */
+export async function isDirty(): Promise<boolean> {
+  return invoke<boolean>('is_dirty');
+}
+
+/** 弹出原生「另存为」对话框，返回绝对路径；取消返回 null。 */
+export async function pickSavePath(defaultPath?: string): Promise<string | null> {
+  const result = await invoke<string | null>('plugin:dialog|save', {
+    options: {
+      title: '另存为',
+      defaultPath,
+      filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+    },
+  });
+  return result;
 }
