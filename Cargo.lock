@@ -815,6 +815,7 @@ dependencies = [
  "dw-core",
  "dw-log",
  "lopdf",
+ "serde",
  "serde_json",
 ]
 

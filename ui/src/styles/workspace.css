@@ -1,0 +1,166 @@
+/* Workspace 层：左侧导航条 + 面板 + 页面列表。 */
+
+.dw-workspace-nav {
+  display: flex;
+  flex: 0 0 auto;
+  min-height: 0;
+  background: var(--dw-surface);
+  border-right: 1px solid var(--dw-border);
+}
+
+/* 导航条：图标列，始终可见（折叠只隐藏面板）。 */
+.dw-nav-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: 36px;
+  padding: 6px 0;
+  border-right: 1px solid var(--dw-border);
+  background: var(--dw-surface-2);
+  flex: 0 0 auto;
+}
+
+.dw-nav-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: 1px solid transparent;
+  border-radius: var(--dw-radius);
+  background: transparent;
+  color: var(--dw-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.dw-nav-item:hover:not(:disabled) {
+  background: var(--dw-hover);
+  color: var(--dw-text);
+}
+
+.dw-nav-item.is-active {
+  background: var(--dw-accent-soft);
+  border-color: var(--dw-accent);
+  color: var(--dw-accent);
+}
+
+.dw-nav-item.is-disabled,
+.dw-nav-item:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.dw-nav-spacer {
+  flex: 1;
+}
+
+.dw-nav-toggle {
+  border-top: 1px solid var(--dw-border);
+  border-radius: 0;
+  width: 28px;
+}
+
+.dw-nav-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--dw-surface);
+}
+
+.dw-nav-resizer {
+  width: 4px;
+  cursor: col-resize;
+  background: transparent;
+  flex: 0 0 auto;
+}
+
+.dw-nav-resizer:hover {
+  background: var(--dw-accent-soft);
+}
+
+/* ---- 页面 Workspace：缩略图列表 ---- */
+
+.dw-page-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.dw-page-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface);
+  font-size: 11px;
+  cursor: grab;
+  user-select: none;
+}
+
+.dw-page-item:hover {
+  border-color: var(--dw-accent);
+}
+
+.dw-page-item.is-current {
+  border-color: var(--dw-border-strong);
+  box-shadow: inset 2px 0 0 var(--dw-text-muted);
+}
+
+.dw-page-item.is-selected {
+  border-color: var(--dw-accent);
+  background: var(--dw-accent-soft);
+  color: var(--dw-accent);
+}
+
+.dw-page-no {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  border-radius: 4px;
+  background: var(--dw-surface-3);
+  font-weight: 600;
+  font-size: 10px;
+}
+
+.dw-page-meta {
+  flex: 1;
+  color: var(--dw-text-muted);
+}
+
+.dw-page-rot {
+  color: var(--dw-warning);
+  font-weight: 600;
+}
+
+/* ---- AI Workspace 输入区（21 章接入前为禁用态） ---- */
+
+.dw-ai-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  width: 100%;
+}
+
+.dw-ai-input {
+  flex: 1;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+  font-size: 11px;
+  resize: none;
+}
+
+.dw-ai-input:disabled {
+  color: var(--dw-text-muted);
+  cursor: not-allowed;
+}

@@ -1,0 +1,61 @@
+/* Design Token（规范 16 §十二）：所有颜色 / 尺寸 / 字体只能引用这里的变量。
+   禁止在组件里硬编码颜色；Light / Dark 由 <html data-theme> 切换，System 由 JS 跟随系统。 */
+
+:root {
+  --dw-bg: #eef1f6;
+  --dw-surface: #ffffff;
+  --dw-surface-2: #f5f7fa;
+  --dw-surface-3: #e8ecf2;
+  --dw-border: #d3d9e3;
+  --dw-border-strong: #b9c2d0;
+  --dw-text: #1d2433;
+  --dw-text-muted: #667085;
+  --dw-accent: #2f6fed;
+  --dw-accent-soft: rgba(47, 111, 237, 0.14);
+  --dw-accent-text: #ffffff;
+  --dw-danger: #d92d20;
+  --dw-danger-soft: rgba(217, 45, 32, 0.12);
+  --dw-success: #039855;
+  --dw-warning: #dc6803;
+  --dw-selection: rgba(47, 111, 237, 0.26);
+  --dw-hover: rgba(47, 111, 237, 0.12);
+  --dw-caret: #2f6fed;
+  /* 纸张：PDF 页面永远是白纸，深色主题下也不跟着变暗。 */
+  --dw-paper: #ffffff;
+
+  --dw-font: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --dw-font-mono: "Cascadia Code", "Consolas", monospace;
+  --dw-radius: 6px;
+  --dw-radius-lg: 10px;
+  --dw-shadow: 0 4px 16px rgba(16, 24, 40, 0.12);
+
+  --dw-titlebar-h: 38px;
+  --dw-ribbon-h: 104px;
+  --dw-statusbar-h: 30px;
+  --dw-sidebar-w: 224px;
+  --dw-inspector-w: 296px;
+  --dw-tabbar-h: 32px;
+}
+
+:root[data-theme="dark"] {
+  --dw-bg: #141922;
+  --dw-surface: #1d2430;
+  --dw-surface-2: #232b39;
+  --dw-surface-3: #2c3545;
+  --dw-border: #364154;
+  --dw-border-strong: #4a566b;
+  --dw-text: #e6eaf2;
+  --dw-text-muted: #98a2b3;
+  --dw-accent: #5b8dff;
+  --dw-accent-soft: rgba(91, 141, 255, 0.2);
+  --dw-accent-text: #0d1420;
+  --dw-danger: #f97066;
+  --dw-danger-soft: rgba(249, 112, 102, 0.16);
+  --dw-success: #56c48a;
+  --dw-warning: #f2a455;
+  --dw-selection: rgba(91, 141, 255, 0.3);
+  --dw-hover: rgba(91, 141, 255, 0.16);
+  --dw-caret: #5b8dff;
+  --dw-paper: #ffffff;
+  --dw-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}

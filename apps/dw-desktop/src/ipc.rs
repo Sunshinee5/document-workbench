@@ -478,6 +478,34 @@ pub fn read_document_bytes(
     Ok(tauri::ipc::Response::new(bytes))
 }
 
+// ---------------------------------------------------------------------------
+// 规范 16 C-8：对象树只读投影。供 Objects Workspace 与 Inspector 展示。
+// 解析与投影在 dw-pdf（IPC 不解析文档），本命令只取文档并透传结果。
+// 只读：不产生 Command / Diff / History，不修改 Document，不写盘。
+// ---------------------------------------------------------------------------
+
+/// 对象树投影类型由 dw-pdf 提供，IPC 不重复定义结构。
+pub use dw_pdf::object_tree_view::{ObjectNodeInfo, ObjectPageInfo, ObjectTreeInfo};
+
+/// 读取对象树：走 18 章冻结链路 `PDF → Parser → ObjectMapper → ObjectTree`，
+/// 与编辑路径共用同一 Parser / Mapper，不新增第二套解析。
+#[tauri::command]
+pub fn get_object_tree(
+    document_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<ObjectTreeInfo, String> {
+    let manager = lock(&state.session_manager);
+    let session = manager
+        .active()
+        .ok_or_else(|| "读取对象树失败：没有活动会话".to_string())?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "读取对象树失败：文档不存在".to_string())?;
+    dw_pdf::object_tree_view::project_object_tree(document_id, document)
+        .map_err(|error| format!("解析对象树失败：{}", error.message))
+}
+
 /// 视图状态：`Workspace.view_state` 的快照，是当前页 / 缩放 / 滚动的唯一真值源。
 #[derive(Debug, Clone, Serialize)]
 pub struct ViewStateInfo {

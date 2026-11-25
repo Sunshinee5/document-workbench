@@ -1,0 +1,504 @@
+/* 组件层：Button / Panel / Tree / PropertyGrid / Toast / Inspector / Overlay / 画布。 */
+
+/* ---- Button ---- */
+
+.dw-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface);
+  color: var(--dw-text);
+  font-size: 12px;
+  line-height: 1.4;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.dw-btn:hover:not(:disabled) {
+  background: var(--dw-surface-2);
+  border-color: var(--dw-border-strong);
+}
+
+.dw-btn:disabled {
+  color: var(--dw-text-muted);
+  background: var(--dw-surface-2);
+  border-color: var(--dw-border);
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.dw-btn-sm {
+  padding: 2px 8px;
+  font-size: 11px;
+}
+
+.dw-btn-primary {
+  background: var(--dw-accent);
+  border-color: var(--dw-accent);
+  color: var(--dw-accent-text);
+}
+
+.dw-btn-primary:hover:not(:disabled) {
+  background: var(--dw-accent);
+  filter: brightness(1.06);
+}
+
+.dw-btn-primary:disabled {
+  background: var(--dw-surface-2);
+  border-color: var(--dw-border);
+  color: var(--dw-text-muted);
+}
+
+.dw-btn-danger {
+  color: var(--dw-danger);
+  border-color: var(--dw-danger);
+  background: var(--dw-danger-soft);
+}
+
+.dw-btn-ghost {
+  background: transparent;
+  border-color: transparent;
+}
+
+.dw-btn-active {
+  background: var(--dw-accent-soft);
+  border-color: var(--dw-accent);
+  color: var(--dw-accent);
+}
+
+/* Ribbon 大按钮：图标在上、文字在下。 */
+.dw-btn-stacked {
+  flex-direction: column;
+  gap: 1px;
+  width: 58px;
+  height: 46px;
+  padding: 3px 2px;
+  border-color: transparent;
+  background: transparent;
+  font-size: 10px;
+}
+
+.dw-btn-stacked .dw-icon {
+  font-size: 15px;
+}
+
+.dw-btn-stacked .dw-btn-label {
+  max-width: 54px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ---- Panel ---- */
+
+.dw-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--dw-surface);
+}
+
+.dw-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+.dw-panel-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dw-panel-count {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+.dw-panel-body {
+  flex: 1;
+  min-height: 0;
+}
+
+.dw-panel-footer {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+.dw-panel-warnings {
+  padding: 6px 10px 10px;
+}
+
+.dw-panel-warning {
+  color: var(--dw-warning);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+/* ---- Tree ---- */
+
+.dw-tree-level {
+  margin: 0;
+  padding: 4px 0;
+  list-style: none;
+}
+
+.dw-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px;
+  margin: 0 4px;
+  padding-right: 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--dw-text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.dw-tree-row:hover {
+  background: var(--dw-hover);
+}
+
+.dw-tree-row.is-focused {
+  background: var(--dw-accent-soft);
+  color: var(--dw-accent);
+}
+
+.dw-tree-row.is-muted .dw-tree-label {
+  color: var(--dw-text-muted);
+}
+
+.dw-tree-arrow {
+  display: inline-flex;
+  justify-content: center;
+  width: 12px;
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+.dw-tree-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-tree-badge {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+/* ---- PropertyGrid ---- */
+
+.dw-prop-section {
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--dw-border);
+}
+
+.dw-prop-section:last-child {
+  border-bottom: none;
+}
+
+.dw-prop-section-title {
+  margin: 0;
+  padding: 8px 10px 2px;
+  color: var(--dw-text-muted);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dw-props {
+  margin: 0;
+  padding: 4px 10px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dw-prop-row {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dw-prop-label {
+  flex: 0 0 68px;
+  color: var(--dw-text-muted);
+}
+
+.dw-prop-value {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  word-break: break-all;
+}
+
+.dw-prop-value.is-mono {
+  font-family: var(--dw-font-mono);
+  font-size: 10.5px;
+}
+
+.dw-prop-value.is-muted {
+  color: var(--dw-text-muted);
+}
+
+.dw-prop-actions {
+  display: flex;
+  gap: 6px;
+  padding: 6px 10px 0;
+}
+
+/* ---- Toast ---- */
+
+.dw-toast-stack {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.dw-toast {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 380px;
+  padding: 8px 10px;
+  border: 1px solid var(--dw-border);
+  border-left-width: 3px;
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface);
+  box-shadow: var(--dw-shadow);
+  font-size: 12px;
+  pointer-events: auto;
+}
+
+.dw-toast-info {
+  border-left-color: var(--dw-accent);
+}
+
+.dw-toast-success {
+  border-left-color: var(--dw-success);
+}
+
+.dw-toast-error {
+  border-left-color: var(--dw-danger);
+  color: var(--dw-danger);
+}
+
+.dw-toast-text {
+  flex: 1;
+}
+
+.dw-toast-close {
+  border: none;
+  background: transparent;
+  color: var(--dw-text-muted);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+/* ---- Inspector ---- */
+
+.dw-inspector {
+  display: flex;
+  flex-direction: column;
+  width: var(--dw-inspector-w);
+  flex: 0 0 auto;
+  background: var(--dw-surface);
+  border-left: 1px solid var(--dw-border);
+}
+
+.dw-inspector-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+.dw-inspector-title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.dw-inspector-hint {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 170px;
+}
+
+.dw-inspector-body {
+  flex: 1;
+  min-height: 0;
+  padding-bottom: 8px;
+}
+
+/* ---- 画布与 PDF.js ---- */
+
+.pdf-viewer {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--dw-surface-3);
+}
+
+/* 鼠标模式统一由容器决定光标，模块不得自行改（§十）。 */
+.pdf-viewer[data-mode='select'] {
+  cursor: crosshair;
+}
+
+.pdf-viewer[data-mode='edit'] {
+  cursor: text;
+}
+
+.pdf-viewer[data-mode='ocr'] {
+  cursor: cell;
+}
+
+.pdf-viewer[data-mode='annotation'] {
+  cursor: copy;
+}
+
+.pdf-pages {
+  display: flex;
+  flex-direction: column;
+  /* 不用 align-items: center：页面放大到宽于容器时，居中会把左侧溢出挤进不可滚动区。 */
+  align-items: flex-start;
+  gap: 16px;
+  width: max-content;
+  min-width: 100%;
+  box-sizing: border-box;
+  padding: 20px 24px 40px;
+}
+
+.pdf-page-slot {
+  position: relative;
+}
+
+.pdf-page-slot.selected .pdf-page {
+  outline: 3px solid var(--dw-accent);
+  outline-offset: 2px;
+}
+
+.pdf-page {
+  position: relative;
+  margin: 0 auto;
+  /* 纸张恒为白色：深色主题只改工作台，不改文档。 */
+  background: var(--dw-paper);
+  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.16);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.pdf-canvas {
+  display: block;
+}
+
+.pdf-canvas.pending {
+  opacity: 0;
+}
+
+.pdf-page-number {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgba(32, 43, 58, 0.06);
+  color: var(--dw-text-muted);
+  font-size: 11px;
+}
+
+.viewer-empty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  height: 100%;
+  background: var(--dw-surface-3);
+}
+
+.document-empty {
+  font-size: 16px;
+  color: var(--dw-text);
+}
+
+.document-hint {
+  font-size: 12px;
+  color: var(--dw-text-muted);
+}
+
+/* ---- Overlay Stack（顺序固定，全部不拦截鼠标） ---- */
+
+.dw-overlays {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dw-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.dw-object-box {
+  position: absolute;
+  border: 1px solid transparent;
+}
+
+.dw-object-box.is-focused {
+  border-color: var(--dw-accent);
+  background: var(--dw-selection);
+}
+
+/* Editing 层：caret 占位，编辑事务由 18-06 EditingSession 驱动后接管。 */
+.dw-layer-editing.is-active::after {
+  content: '';
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  width: 1px;
+  height: 14px;
+  background: var(--dw-caret);
+  animation: dw-caret-blink 1s steps(2, start) infinite;
+}
+
+@keyframes dw-caret-blink {
+  to {
+    visibility: hidden;
+  }
+}
+
+/* Debug 层默认关闭：只作为调试网格的挂载点。 */
+.dw-layer-debug {
+  display: none;
+}

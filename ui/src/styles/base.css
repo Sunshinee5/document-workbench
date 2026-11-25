@@ -1,0 +1,144 @@
+/* 基础层：reset + 六区骨架 + 滚动条。所有颜色 / 尺寸只引用 Design Token。 */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: var(--dw-font);
+  font-size: 13px;
+  color: var(--dw-text);
+  background: var(--dw-bg);
+  /* 工作台是桌面应用形态：禁止整页滚动与文本误选。 */
+  overflow: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+}
+
+/* 键盘可达性：统一焦点环，不用各组件自己画。 */
+:focus-visible {
+  outline: 2px solid var(--dw-accent);
+  outline-offset: 1px;
+}
+
+/* 拖拽改宽期间：禁用文本选择并统一光标。 */
+body.dw-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* ---- 六区骨架：TitleBar → Ribbon → Workspace → Canvas → Inspector → StatusBar ---- */
+
+.dw-app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: var(--dw-bg);
+}
+
+.dw-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.dw-center {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.dw-canvas {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  background: var(--dw-surface-3);
+}
+
+/* ---- 滚动容器：统一细滚动条 ---- */
+
+.dw-scroll {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--dw-border-strong) transparent;
+}
+
+.dw-scroll::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+.dw-scroll::-webkit-scrollbar-thumb {
+  background: var(--dw-border-strong);
+  border: 3px solid transparent;
+  border-radius: 6px;
+  background-clip: content-box;
+}
+
+.dw-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- 图标：文本符号统一尺寸，不参与布局压缩 ---- */
+
+.dw-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 14px;
+  font-size: 13px;
+  line-height: 1;
+  font-style: normal;
+}
+
+/* ---- 空态：Workspace 与 Inspector 共用 ---- */
+
+.dw-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 18px 14px;
+}
+
+.dw-empty-text {
+  color: var(--dw-text);
+  font-size: 12px;
+}
+
+.dw-empty-hint {
+  color: var(--dw-text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+/* ---- 响应式：低宽度自动折叠左侧面板（§十二） ---- */
+
+@media (max-width: 1280px) {
+  .dw-workspace-nav .dw-nav-panel {
+    width: 180px !important;
+  }
+}
+
+@media (max-width: 1100px) {
+  .dw-inspector {
+    width: 240px;
+  }
+}

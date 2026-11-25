@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          16 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          17 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -26,7 +26,7 @@ docs/
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 十六份规范
+## 十七份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|
@@ -46,6 +46,7 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
 | `spec/13-Font-Rewrite-Engine-R1.md` | **18-07 Font Rewrite Engine**：FontRegistry 唯一字体真值、Unicode→Glyph、Subset Planning、FontPatch、MissingGlyph、FT-01~08 | 实现 18-07 / 18-08 Content Stream Rewrite 前 |
 | `spec/14-Content-Stream-Rewrite-R1.md` | **18-08 Content Stream Rewrite**：唯一 Operator 重写引擎、Unknown 100% 保留、Operator 顺序冻结、ContentPatch 唯一输出、CT-01~11 | 实现 18-08 / 18-09 集成前 |
 | `spec/15-Integration-Regression-R1.md` | **18-09 Integration & Regression**：Save 唯一消费 ContentPatch、RoundTrip 冻结、Patch 生命周期、Save 不重算字体、IT-01~10、Object Editing 正式冻结 | 18 章收口；19/20/21 章统一基础 |
+| `spec/16-Document-Workbench-UI-Architecture-R1.md` | **文档16 UI Architecture**：六区固定布局、Ribbon 六页签、Workspace 十类、八层 Overlay、Inspector 五分区、StatusBar 十项、Design Token 双主题、17/18 章 UI 入口、C-1~C-11 裁决 | 做任何界面、交互、Workspace 前 |
 
 ## 指南（无规范权）
 

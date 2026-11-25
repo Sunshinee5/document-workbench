@@ -24,8 +24,10 @@ import {
   undo,
   type SaveInfo,
   setViewState,
+  getObjectTree,
   type AppInfo,
   type DocumentInfo,
+  type ObjectTreeInfo,
   type PageLayoutInfo,
   type SelectionMode,
 } from '../ipc';
@@ -35,6 +37,10 @@ export interface OpenTab {
   documentId: number;
   title: string;
   pageCount: number;
+  /** 源文件绝对路径（Inspector 展示用）。 */
+  path: string;
+  /** 文件大小（字节）；重挂界面时后端摘要不含该字段，记 0 表示未知。 */
+  fileSize: number;
 }
 
 /** 界面只读状态快照。 */
@@ -53,6 +59,10 @@ export interface WorkbenchState {
   author: string;
   /** 活动文档页数（来自 DocumentMetadata.page_count） */
   pageCount: number;
+  /** 活动文档源文件路径 */
+  sourcePath: string;
+  /** 活动文档文件大小（字节），0 表示未知 */
+  fileSize: number;
   /** 当前页（投影自 view_state.current_page） */
   currentPage: number;
   /** 缩放（投影自 view_state.zoom） */
@@ -83,6 +93,17 @@ export interface WorkbenchState {
   lastSavedAt: string;
   /** 上次异常退出是否留下恢复记录 */
   recoveryAvailable: boolean;
+  /**
+   * 对象树投影（只读，来自 `get_object_tree`）。
+   *
+   * 它投影的是**源文件**结构，不是内存里的未保存编辑：
+   * 保存成功后重新拉取，未保存的改动不会出现在这里。
+   */
+  objectTree: ObjectTreeInfo | null;
+  /** 对象树是否正在解析。 */
+  objectTreeLoading: boolean;
+  /** 对象树解析失败原因；空串表示无错误。 */
+  objectTreeError: string;
 }
 
 /** 缩放档位：产品只给有限档，避免自由输入造成视图抖动。 */
@@ -100,6 +121,8 @@ export class WorkbenchViewModel {
     activeTitle: '',
     author: '',
     pageCount: 0,
+    sourcePath: '',
+    fileSize: 0,
     currentPage: 1,
     zoom: 1,
     loading: false,
@@ -115,6 +138,9 @@ export class WorkbenchViewModel {
     saveRevision: 0,
     lastSavedAt: '',
     recoveryAvailable: false,
+    objectTree: null,
+    objectTreeLoading: false,
+    objectTreeError: '',
   };
 
   private listeners: Array<() => void> = [];
@@ -173,6 +199,8 @@ export class WorkbenchViewModel {
         documentId: item.document_id,
         title: item.title,
         pageCount: item.page_count,
+        path: item.path,
+        fileSize: 0,
       }));
       const active = summaries.find((item) => item.active);
       this.update({
@@ -180,6 +208,7 @@ export class WorkbenchViewModel {
         activeDocumentId: active?.document_id ?? this.stateValue.activeDocumentId,
         activeTitle: active?.title ?? this.stateValue.activeTitle,
         pageCount: active?.page_count ?? this.stateValue.pageCount,
+        sourcePath: active?.path ?? this.stateValue.sourcePath,
       });
     } catch {
       // 浏览器预览环境无后端：保持空列表，界面仍可见。
@@ -198,7 +227,13 @@ export class WorkbenchViewModel {
       const info: DocumentInfo = await openDocument(path);
       const tabs = [
         ...this.stateValue.tabs.filter((tab) => tab.documentId !== info.document_id),
-        { documentId: info.document_id, title: info.title, pageCount: info.page_count },
+        {
+          documentId: info.document_id,
+          title: info.title,
+          pageCount: info.page_count,
+          path: info.path,
+          fileSize: info.file_size,
+        },
       ];
       this.update({
         tabs,
@@ -206,6 +241,8 @@ export class WorkbenchViewModel {
         activeTitle: info.title,
         author: info.author ?? '',
         pageCount: info.page_count,
+        sourcePath: info.path,
+        fileSize: info.file_size,
         currentPage: 1,
         zoom: 1,
         loading: false,
@@ -217,6 +254,7 @@ export class WorkbenchViewModel {
       });
       await this.refreshLayout(info.document_id);
       await this.refreshHistoryState();
+      await this.loadObjectTree();
     } catch (error) {
       this.update({
         loading: false,
@@ -236,6 +274,8 @@ export class WorkbenchViewModel {
       activeDocumentId: documentId,
       activeTitle: tab.title,
       pageCount: tab.pageCount,
+      sourcePath: tab.path,
+      fileSize: tab.fileSize,
       currentPage: 1,
       zoom: 1,
       error: '',
@@ -245,6 +285,7 @@ export class WorkbenchViewModel {
     });
     await this.refreshLayout(documentId);
     await this.refreshHistoryState();
+    await this.loadObjectTree();
   }
 
   /** 关闭文档：移除 Document 与页签。 */
@@ -259,8 +300,12 @@ export class WorkbenchViewModel {
         activeDocumentId: wasActive ? (next?.documentId ?? null) : this.stateValue.activeDocumentId,
         activeTitle: wasActive ? (next?.title ?? '') : this.stateValue.activeTitle,
         pageCount: wasActive ? (next?.pageCount ?? 0) : this.stateValue.pageCount,
+        sourcePath: wasActive ? (next?.path ?? '') : this.stateValue.sourcePath,
+        fileSize: wasActive ? (next?.fileSize ?? 0) : this.stateValue.fileSize,
         currentPage: 1,
         status: tabs.length === 0 ? '就绪' : this.stateValue.status,
+        // 关掉最后一个文档后对象树必须清空，否则 Workspace 还显示已关闭文档的结构。
+        objectTree: tabs.length === 0 ? null : this.stateValue.objectTree,
       });
     } catch (error) {
       this.update({ error: messageOf(error), status: `关闭失败：${messageOf(error)}` });
@@ -537,11 +582,39 @@ export class WorkbenchViewModel {
       dirty: info.dirty,
       error: '',
       lastSavedAt: time,
+      sourcePath: info.path,
       saveRevision: this.stateValue.saveRevision + 1,
       layoutRevision: this.stateValue.layoutRevision + 1,
       status: `已保存：${time}`,
       taskEvent: `${info.incremental ? '增量保存' : '全量保存'} · ${formatSize(info.bytes_written)} · ${info.elapsed_ms}ms`,
     });
+    // 源文件字节已变，对象树必须重新解析，否则 Workspace 展示的是旧结构。
+    void this.loadObjectTree();
+  }
+
+  /**
+   * 拉取对象树投影：Objects Workspace 与 Inspector 的唯一数据源。
+   *
+   * 只读：不产生 Command / Diff，不改 Document；解析在 dw-pdf 内完成。
+   */
+  async loadObjectTree(): Promise<void> {
+    const id = this.stateValue.activeDocumentId;
+    if (id === null) {
+      this.update({ objectTree: null, objectTreeLoading: false, objectTreeError: '' });
+      return;
+    }
+    this.update({ objectTreeLoading: true, objectTreeError: '' });
+    try {
+      const tree = await getObjectTree(id);
+      this.update({ objectTree: tree, objectTreeLoading: false });
+    } catch (error) {
+      // 浏览器预览环境无后端时保持空树，不打断界面。
+      this.update({
+        objectTree: null,
+        objectTreeLoading: false,
+        objectTreeError: messageOf(error),
+      });
+    }
   }
 
   /** 清空错误提示。 */

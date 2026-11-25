@@ -33,6 +33,7 @@ pub fn run() {
             ipc::open_document,
             ipc::close_document,
             ipc::read_document_bytes,
+            ipc::get_object_tree,
             ipc::list_documents,
             ipc::set_view_state,
             ipc::driver_names,

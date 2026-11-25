@@ -13,6 +13,7 @@ pub mod intermediate;
 pub mod metadata;
 pub mod metadata_parser;
 pub mod object_map;
+pub mod object_tree_view;
 pub mod page_parser;
 pub mod parse_context;
 pub mod parse_result;

@@ -1,0 +1,316 @@
+/* 外壳层：TitleBar / Ribbon / StatusBar / 文档页签条。 */
+
+/* ---- TitleBar（第一区，高 38px） ---- */
+
+.dw-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: var(--dw-titlebar-h);
+  padding: 0 12px;
+  background: var(--dw-surface);
+  border-bottom: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+.dw-titlebar-brand {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.dw-titlebar-divider {
+  width: 1px;
+  height: 16px;
+  background: var(--dw-border);
+}
+
+.dw-titlebar-doc {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--dw-text-muted);
+  font-size: 12px;
+}
+
+.dw-titlebar-dirty {
+  margin-left: 4px;
+  color: var(--dw-warning);
+  font-weight: 700;
+}
+
+.dw-titlebar-recovery {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: var(--dw-radius);
+  background: var(--dw-danger-soft);
+  color: var(--dw-danger);
+  font-size: 11px;
+}
+
+.dw-titlebar-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--dw-text-muted);
+  font-size: 11px;
+}
+
+.dw-titlebar-edition {
+  padding: 1px 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: 10px;
+}
+
+/* ---- Ribbon（第二区，高 104px：页签 30 + 主体 74） ---- */
+
+.dw-ribbon {
+  position: relative;
+  flex: 0 0 auto;
+  background: var(--dw-surface);
+  border-bottom: 1px solid var(--dw-border);
+}
+
+.dw-ribbon-tabs {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 30px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--dw-border);
+}
+
+.dw-ribbon-tab {
+  height: 26px;
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--dw-radius) var(--dw-radius) 0 0;
+  background: transparent;
+  color: var(--dw-text-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dw-ribbon-tab:hover {
+  background: var(--dw-hover);
+  color: var(--dw-text);
+}
+
+.dw-ribbon-tab.is-active {
+  background: var(--dw-surface-2);
+  border-color: var(--dw-border);
+  color: var(--dw-text);
+  font-weight: 600;
+}
+
+.dw-ribbon-body {
+  display: flex;
+  align-items: stretch;
+  gap: 0;
+  height: 73px;
+  padding: 4px 8px;
+  background: var(--dw-surface-2);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dw-ribbon-group {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 0 10px;
+  border-right: 1px solid var(--dw-border);
+}
+
+.dw-ribbon-group:last-child {
+  border-right: none;
+}
+
+.dw-ribbon-group-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+  height: 52px;
+}
+
+.dw-ribbon-group-label {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+  text-align: center;
+  padding-top: 2px;
+}
+
+.dw-ribbon-hint {
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+/* ---- 文档页签条（Workspace 顶部上下文区，C-4） ---- */
+
+.dw-tabs {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--dw-tabbar-h);
+  padding: 0 8px;
+  background: var(--dw-surface-2);
+  border-bottom: 1px solid var(--dw-border);
+  overflow-x: auto;
+  flex: 0 0 auto;
+}
+
+.dw-tabs-empty {
+  color: var(--dw-text-muted);
+  font-size: 11px;
+}
+
+.dw-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 220px;
+  height: 24px;
+  padding: 0 4px 0 10px;
+  border: 1px solid transparent;
+  border-radius: var(--dw-radius) var(--dw-radius) 0 0;
+  color: var(--dw-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.dw-tab:hover {
+  background: var(--dw-hover);
+}
+
+.dw-tab.is-active {
+  background: var(--dw-surface);
+  border-color: var(--dw-border);
+  border-bottom-color: var(--dw-surface);
+  color: var(--dw-text);
+  font-weight: 600;
+}
+
+.dw-tab-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-tab-pages {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.dw-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  padding: 0;
+  border: none;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--dw-text-muted);
+  cursor: pointer;
+}
+
+.dw-tab-close:hover {
+  background: var(--dw-danger-soft);
+  color: var(--dw-danger);
+}
+
+/* ---- StatusBar（第六区，高 30px） ---- */
+
+.dw-statusbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: var(--dw-statusbar-h);
+  padding: 0 10px;
+  background: var(--dw-surface);
+  border-top: 1px solid var(--dw-border);
+  font-size: 11px;
+  color: var(--dw-text-muted);
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.dw-status-item {
+  white-space: nowrap;
+}
+
+.dw-status-item.is-ok {
+  color: var(--dw-success);
+}
+
+.dw-status-item.is-warn {
+  color: var(--dw-warning);
+}
+
+.dw-status-item.is-danger {
+  color: var(--dw-danger);
+}
+
+.dw-status-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--dw-border);
+}
+
+.dw-status-spacer {
+  flex: 1;
+}
+
+.dw-status-event {
+  color: var(--dw-text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 320px;
+}
+
+.dw-status-error {
+  color: var(--dw-danger);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 420px;
+}
+
+/* 页码项：唯一可交互的状态栏项，保持十项结构不变。 */
+.dw-status-page {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.dw-status-page-input {
+  width: 34px;
+  height: 18px;
+  padding: 0 2px;
+  border: 1px solid var(--dw-border);
+  border-radius: 3px;
+  background: var(--dw-surface-2);
+  color: var(--dw-text);
+  font-size: 11px;
+  text-align: center;
+}
+
+.dw-status-page-input:disabled {
+  color: var(--dw-text-muted);
+  cursor: not-allowed;
+}

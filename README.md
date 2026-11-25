@@ -19,13 +19,17 @@ Windows 本地绿色版文档工作台。React + TypeScript + Tauri 2 + Rust Car
 | **中文离线渲染** | 随包携带 169 个 CMap + 16 个标准字体，未嵌入字形的 Adobe-GB1 CID 字体也能正确显示；实测 STSong-Light 样本无乱码 | `ui/public/pdfjs/` |
 | **页面编辑（Feature-02）** | 旋转 90°/180°/270°、删除页（至少保留一页）、移动页、缩略图拖拽排序、Ctrl/Shift 多选批量编辑 | [旋转](docs/features/15-screenshots/02-rotate-90.png) · [删页](docs/features/15-screenshots/03-delete.png) · [拒绝全删](docs/features/15-screenshots/04-refuse-all-delete.png) · [移动](docs/features/15-screenshots/05-move.png) · [多选](docs/features/15-screenshots/06-multi-select.png) |
 | **History / Undo / Redo（Feature-03）** | 旋转 / 删页 / 移页均可撤销重做；Diff 双向回放，Cursor 与 redo 分支截断，Task 事务回滚，Checkpoint 每 100 条落盘 | `crates/dw-core/src/diff.rs` / `session.rs` |
+| **保存 / 增量保存（Feature-04）** | `ISave::apply_changes()` 统一入口；lopdf 0.34 自带 `IncrementalDocument`（原字节 + 变更对象 + 新 xref + `/Prev`）；Save As 诚实全量；`DocumentSaveState { Clean, Dirty, Saving, Error }` 是 dirty 唯一真值 | `crates/dw-pdf/src/save.rs` |
+| **对象模型与解析（18-01 ~ 18-04）** | `Page.objects` 直接挂对象；`Object.version` 每次修改递增；`PDF → Parser → ObjectMapper → ObjectTree` 全项目单 Parser 单 Mapper；HitTest 走空间索引 | `crates/dw-core/src/object.rs` / `crates/dw-pdf/src/parser.rs` |
+| **选择 / 编辑 / 字体重写 / 内容流重写（18-05 ~ 18-08）** | `SelectionState` 唯一选择真值；`EditingSession` 事务化编辑（WorkingCopy → Commit）；`FontRegistry` + `FontPatch` 只规划不改 Object；`ContentPatch` 是唯一输出，Unknown Operator 100% 保留 | `crates/dw-core/src/{selection,editing,font,content}.rs` / `crates/dw-pdf/src/content_rewrite.rs` |
+| **工作台 UI 架构（16）** | 六区固定：TitleBar / Ribbon(六页签) / Workspace(十类) / Canvas(PDF.js + 八层 Overlay) / Inspector(五分区) / StatusBar(十项)；Design Token 双主题；统一组件层自建，依赖零新增 | `ui/src/components/*` · [规范](docs/spec/16-Document-Workbench-UI-Architecture-R1.md) |
 | **Diff 链路** | Task 产出 `RotationDiff` / `DeletePageDiff` / `MovePageDiff`，TaskManager 收口，落盘到 `Recovery/diffs/` 暂存；**15 不写 History，写入归 16** | `crates/dw-core/src/diff.rs` |
 | **Task 事务** | `submit_all()` 全部成功才 Commit；任一失败逆序回滚已完成 Task、丢弃 Diff、不写 History（`02` §3.6） | `crates/dw-core/src/task.rs` |
 | **最小日志设施** | `dw_log`：INFO / WARN / ERROR / TRACE 四档，按天滚动、保留 7 天，零第三方依赖 | `crates/dw-log/` |
 | **能力门禁** | 全链路唯一准入点；只检查 `create()` 时声明的 `Capability`，失败对外只抛 `TaskRejected` | `crates/dw-core/src/capability.rs` |
 | **绿色版打包** | `scripts/package.sh` 前端先构建、Rust 后编译，末尾自检 exe 确实内嵌当前前端；产物约 25 MB | `dist/DocumentWorkbench/`（不入库） |
 
-验证状态：**36 个测试全部通过**；`tools/verify.ps1` 的 fmt / clippy / test / 前端构建全部 PASS，`npx tsc --noEmit` 通过，打包自检通过，绿色版异地复制后可直接启动。
+验证状态：**191 个测试全部通过**（`dw-core` + `dw-pdf`；`real_pdf` 组 2 例需 `DW_PDF_SAMPLE` 环境变量，未设置时跳过）；`tools/verify.ps1` 的 fmt / clippy / test / 前端构建全部 PASS，`npx tsc --noEmit` 通过。**Tauri 构建受本机构建链限制**（缺 mingw-w64 的 `as.exe`，`raw-dylib` 导入库无法生成），详见 [文档16 测试报告](docs/records/文档16-UI架构-测试报告.md) 第四节。
 
 详细实现记录：[Feature-01](docs/records/Feature-01-实现记录.md) · [Feature-02](docs/records/Feature-02-实现记录.md) · [Feature-03](docs/records/Feature-03-实现记录.md)
 
@@ -40,10 +44,10 @@ Windows 本地绿色版文档工作台。React + TypeScript + Tauri 2 + Rust Car
 | 功能 | 当前状态 | 归到哪里 |
 |---|---|---|
 
-| **Save / Save As** | 编辑只改内存页布局，不保存也不自动保存，关掉软件即丢失 | **17** |
+| ~~Save / Save As~~ | 已完成（Feature-04，含增量保存） | — |
 | **插入空白页** | 文档 15 标记为 MVP 后置 | 后续 Feature |
-| **Recovery 恢复实现** | Checkpoint 与 Crash Recovery Hook 接口已就位，恢复流程未实现 | **17** |
-| **搜索与高亮 / 真实缩略图 / 深色模式** | Feature-01 范围外 | 后续 Feature |
+| **Recovery 自动恢复** | 恢复记录只存摘要/提示，不自动重建 Document / History | 后续 Feature |
+| **搜索与高亮 / 真实缩略图** | Feature-01 范围外；深色模式已随 16 章落地 | 后续 Feature |
 | **框选多页** | Ctrl / Shift 已支持，后端 `replace` 模式已备好；框选 UI 未做 | 后续 Feature |
 | **OCR** | `dw-ocr` 仍是骨架（`WindowsOcr` / `Tesseract` / `PaddleOCR` 占位） | Stage 4 |
 | **Office 互转** | `dw-office` 仍是骨架（LibreOffice / ONLYOFFICE 占位） | Stage 4 |
@@ -96,7 +100,7 @@ crates/dw-ocr       OCR Driver 骨架
 crates/dw-office    Office Driver 骨架
 apps/dw-desktop     Tauri 2 桌面壳、IPC、组装层 CoreState
 ui                  React + TS + Vite 前端
-docs/spec           6 份规范，唯一事实源
+docs/spec           17 份规范，唯一事实源
 docs/features       Feature 文档（15 起含 Implementation Order 与 Failure Policy）
 docs/records        实现与评审记录，仅溯源
 docs/guides         排期与环境指南，无规范权
@@ -141,7 +145,7 @@ bash scripts/package.sh
 | [WebView2](https://learn.microsoft.com/microsoft-edge/webview2/) | Windows 桌面 WebView 运行时 |
 | [ReportLab](https://bitbucket.org/reportlab/reportlab) | 仅用于生成中文渲染测试样本，不是运行时依赖 |
 
-执行链分层、`Command → Diff → Checkpoint` 的撤销模型参考了常见的编辑器架构思路；本项目在此基础上做了冻结收敛，具体以 `docs/spec/` 六份规范为准。
+执行链分层、`Command → Diff → Checkpoint` 的撤销模型参考了常见的编辑器架构思路；本项目在此基础上做了冻结收敛，具体以 `docs/spec/` 十七份规范为准。
 
 ---
 

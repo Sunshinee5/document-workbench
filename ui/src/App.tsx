@@ -1,15 +1,59 @@
-// 工作台主界面：标题栏 + 工具栏 + 标签栏 + 阅读区 + 状态栏，全部中文。
-// UI 唯一职责是展示与转发意图：按钮只调 ViewModel，不直接碰 Driver / IPC 业务命令。
+// 工作台主界面（规范 16）：TitleBar → Ribbon → Workspace → Canvas → Inspector → StatusBar。
+//
+// 职责边界：UI 只做「展示投影 + 转发意图」。
+// 按钮只调 ViewModel / 直接调 IPC 命令，不解析文档、不改 Document、不自己存真值。
+// 六区结构永久固定：新增能力只能加 Workspace / Ribbon 页签 / Inspector 分区（§十四）。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { PdfViewer, type PdfViewerHandle } from './components/PdfViewer';
-import { WorkbenchViewModel } from './viewmodels';
+import { PdfViewer, type PageOverlayData, type PdfViewerHandle } from './components/PdfViewer';
+import { Inspector } from './components/inspector';
+import {
+  MOUSE_MODE_LABELS,
+  Ribbon,
+  StatusBar,
+  TitleBar,
+  type MouseMode,
+  type RibbonTab,
+} from './components/shell';
+import { ToastStack, useToasts } from './components/ui';
+import {
+  AiPanel,
+  AnnotationPanel,
+  AttachmentsPanel,
+  BookmarksPanel,
+  DocumentTabs,
+  ObjectsPanel,
+  OcrPanel,
+  OutlinePanel,
+  PagesPanel,
+  WorkspaceNav,
+  type WorkspaceKind,
+} from './components/workspace';
+import type { ObjectNodeInfo } from './ipc';
+import { applyTheme, loadTheme, saveTheme, watchSystemTheme, type ThemeMode } from './theme';
+import { WorkbenchViewModel, formatSize } from './viewmodels';
 import './index.css';
+
+/** 侧栏默认宽度（像素）：与 Design Token 保持一致。 */
+const NAV_DEFAULT_WIDTH = 224;
+/** 低于该视口宽度自动折叠侧栏（§十二 响应式）。 */
+const NAV_AUTO_COLLAPSE = 1280;
 
 export default function App() {
   const viewModel = useMemo(() => new WorkbenchViewModel(), []);
   const [state, setState] = useState(() => viewModel.snapshot);
   const viewerRef = useRef<PdfViewerHandle | null>(null);
-  const [pageInput, setPageInput] = useState('1');
+
+  // ---- 纯 UI 状态：不进 Session / Document，不产生 Command ----
+  const [ribbonTab, setRibbonTab] = useState<RibbonTab>('home');
+  const [workspace, setWorkspace] = useState<WorkspaceKind>('pages');
+  const [navCollapsed, setNavCollapsed] = useState(() => window.innerWidth <= NAV_AUTO_COLLAPSE);
+  const [navWidth, setNavWidth] = useState(NAV_DEFAULT_WIDTH);
+  const [mode, setMode] = useState<MouseMode>('browse');
+  const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
+  /** 聚焦对象：只读导航高亮，不是 18-05 SelectionState 真值。 */
+  const [focusedObject, setFocusedObject] = useState<ObjectNodeInfo | null>(null);
+  const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
+  const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
 
@@ -17,12 +61,51 @@ export default function App() {
     void viewModel.initialize();
   }, [viewModel]);
 
-  // 页码输入框跟随当前页；用户正在输入时不覆盖由 onChange 自己维护。
+  // ---- 主题：CSS Variables 切换，纯 UI 偏好（C-10） ----
   useEffect(() => {
-    setPageInput(String(state.currentPage));
-  }, [state.currentPage]);
+    applyTheme(theme);
+    saveTheme(theme);
+  }, [theme]);
 
-  // Viewer 回调全部用稳定引用：Viewer 以 documentId 为加载依赖，回调变动不该触发重载。
+  useEffect(() => watchSystemTheme(() => applyTheme(theme)), [theme]);
+
+  // ---- 响应式：低宽度自动折叠侧栏，恢复宽度后展开 ----
+  useEffect(() => {
+    const onResize = () => {
+      setNavCollapsed(window.innerWidth <= NAV_AUTO_COLLAPSE);
+    };
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // 切换文档时清空聚焦对象，避免 Inspector 显示上一个文档的对象。
+  useEffect(() => {
+    setFocusedObject(null);
+  }, [state.activeDocumentId]);
+
+  // 对象树就绪后默认展开第一页，让 Workspace 一打开就有内容。
+  useEffect(() => {
+    const tree = state.objectTree;
+    if (!tree) {
+      setExpandedNodes([]);
+      return;
+    }
+    setExpandedNodes(tree.pages.length > 0 ? [`page:${tree.pages[0].page}`] : []);
+  }, [state.objectTree]);
+
+  // 错误统一走轻提示；同一错误只提示一次，避免重渲染刷屏。
+  const lastErrorRef = useRef('');
+  useEffect(() => {
+    if (state.error && state.error !== lastErrorRef.current) {
+      lastErrorRef.current = state.error;
+      push(state.error, 'error');
+    }
+    if (!state.error) {
+      lastErrorRef.current = '';
+    }
+  }, [state.error, push]);
+
+  // ---- 画布回调：全部稳定引用，避免 Viewer 反复重载 ----
   const handlePageCount = useCallback(
     (count: number) => viewModel.reportPageCount(count),
     [viewModel],
@@ -33,22 +116,46 @@ export default function App() {
     [viewModel],
   );
   const handleFitZoom = useCallback((zoom: number) => viewModel.reportFitZoom(zoom), [viewModel]);
-  const handleError = useCallback((message: string) => {
-    // 渲染失败不覆盖状态栏，避免把「已打开」冲掉；记录到控制台供排查。
-    console.error('PDF 渲染失败：', message);
+  const handleError = useCallback(
+    (message: string) => {
+      push(`渲染失败：${message}`, 'error');
+    },
+    [push],
+  );
+
+  // ---- 命令转发 ----
+  const goToPage = useCallback(
+    (page: number) => {
+      viewModel.goToPage(page);
+      viewerRef.current?.goToPage(page);
+    },
+    [viewModel],
+  );
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) {
+      void document.exitFullscreen();
+    } else {
+      void document.documentElement.requestFullscreen?.();
+    }
   }, []);
 
-  // 快捷键：Ctrl+O 打开、Ctrl+Z 撤销、Ctrl+Y / Ctrl+Shift+Z 重做、PageUp / PageDown 翻页。
+  // 快捷键：与 Ribbon 一一对应，不引入 Ribbon 之外的命令。
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const modifier = event.ctrlKey || event.metaKey;
-      if (modifier && event.key.toLowerCase() === 'o') {
+      const key = event.key.toLowerCase();
+      if (event.key === 'F11') {
+        event.preventDefault();
+        toggleFullscreen();
+        return;
+      }
+      if (modifier && key === 'o') {
         event.preventDefault();
         void viewModel.openFile();
         return;
       }
-      // Ctrl+S 保存 / Ctrl+Shift+S 另存为：必须放在其他组合键之前，避免被重做分支吞掉。
-      if (modifier && event.key.toLowerCase() === 's') {
+      if (modifier && key === 's') {
         event.preventDefault();
         if (event.shiftKey) {
           void viewModel.saveAs();
@@ -57,16 +164,12 @@ export default function App() {
         }
         return;
       }
-      if (modifier && event.key.toLowerCase() === 'z' && !event.shiftKey) {
+      if (modifier && key === 'z' && !event.shiftKey) {
         event.preventDefault();
         void viewModel.undo();
         return;
       }
-      if (
-        modifier &&
-        (event.key.toLowerCase() === 'y' ||
-          (event.key.toLowerCase() === 'z' && event.shiftKey))
-      ) {
+      if (modifier && (key === 'y' || (key === 'z' && event.shiftKey))) {
         event.preventDefault();
         void viewModel.redo();
         return;
@@ -81,6 +184,11 @@ export default function App() {
         viewModel.zoomOut();
         return;
       }
+      if (modifier && event.key === '0') {
+        event.preventDefault();
+        viewModel.setZoom(1);
+        return;
+      }
       if (event.key === 'PageDown') {
         event.preventDefault();
         viewModel.nextPage();
@@ -93,339 +201,223 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [viewModel]);
+  }, [viewModel, toggleFullscreen]);
+
+  // ---- 投影：对象树 → 逐页 Overlay 数据 ----
+  const overlayPages = useMemo<Record<number, PageOverlayData>>(() => {
+    const map: Record<number, PageOverlayData> = {};
+    for (const page of state.objectTree?.pages ?? []) {
+      map[page.page] = {
+        pageWidth: page.page_width,
+        pageHeight: page.page_height,
+        objects: page.objects.map((object) => ({ objectId: object.object_id, bbox: object.bbox })),
+      };
+    }
+    return map;
+  }, [state.objectTree]);
 
   const hasDocument = state.activeDocumentId !== null;
   const zoomPercent = Math.round(state.zoom * 100);
 
-  const submitPage = () => {
-    const parsed = Number.parseInt(pageInput, 10);
-    if (Number.isFinite(parsed)) {
-      viewModel.goToPage(parsed);
-      viewerRef.current?.goToPage(parsed);
-    } else {
-      setPageInput(String(state.currentPage));
-    }
-  };
+  // 状态栏十项：解析器状态来自对象树投影，OCR / AI / 内存暂无数据源。
+  const parserText = state.objectTreeLoading
+    ? '解析中'
+    : state.objectTreeError
+      ? '解析失败'
+      : state.objectTree
+        ? state.objectTree.warnings.length > 0
+          ? `警告 ${state.objectTree.warnings.length}`
+          : '正常'
+        : '—';
 
-  return (
-    <div className="workbench">
-      <header className="title-bar">
-        <span className="title">{state.title}</span>
-        <span className="document-title">
-          {hasDocument ? `${state.activeTitle}${state.dirty ? ' *' : ''}` : '未打开文档'}
-        </span>
-        <span className="edition">{state.edition}</span>
-      </header>
+  const saveText = state.dirty
+    ? '未保存'
+    : state.lastSavedAt
+      ? `已保存 ${state.lastSavedAt}`
+      : '—';
 
-      {state.recoveryAvailable ? (
-        <div className="recovery-banner">
-          检测到上次异常退出留下的未保存状态；如需恢复请检查 Recovery/session.json 与 History 引用。
-        </div>
-      ) : null}
+  const selectionText =
+    state.selectedPages.length === 0
+      ? 'Selection(None)'
+      : `Selection(Page ${state.selectedPages.join(',')})`;
 
-      <details className="file-menu">
-        <summary>文件</summary>
-        <div className="file-menu-items">
-          <button type="button" onClick={() => void viewModel.openFile()}>
-            打开 PDF <span>Ctrl+O</span>
-          </button>
-          <button
-            type="button"
-            disabled={!hasDocument}
-            onClick={() => void viewModel.save()}
-          >
-            保存 <span>Ctrl+S</span>
-          </button>
-          <button
-            type="button"
-            disabled={!hasDocument}
-            onClick={() => void viewModel.saveAs()}
-          >
-            另存为… <span>Ctrl+Shift+S</span>
-          </button>
-        </div>
-      </details>
-
-      <div className="tool-bar">
-        <button
-          className="tool-button primary"
-          type="button"
-          onClick={() => void viewModel.openFile()}
-        >
-          打开 PDF
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="保存（Ctrl+S）"
-          onClick={() => void viewModel.save()}
-        >
-          保存
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="另存为（Ctrl+Shift+S）"
-          onClick={() => void viewModel.saveAs()}
-        >
-          另存为…
-        </button>
-        <span className="tool-divider" />
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument || !state.canUndo}
-          title="撤销（Ctrl+Z）"
-          onClick={() => void viewModel.undo()}
-        >
-          撤销
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument || !state.canRedo}
-          title="重做（Ctrl+Y）"
-          onClick={() => void viewModel.redo()}
-        >
-          重做
-        </button>
-        {state.dirty ? <span className="dirty-mark">未保存</span> : null}
-        <span className="tool-divider" />
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewModel.prevPage()}
-        >
-          上一页
-        </button>
-        <input
-          className="page-input"
-          value={pageInput}
-          disabled={!hasDocument}
-          onChange={(event) => setPageInput(event.target.value)}
-          onBlur={submitPage}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              submitPage();
-            }
-          }}
-          aria-label="页码"
-        />
-        <span className="page-total">/ {state.pageCount || 0}</span>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewModel.nextPage()}
-        >
-          下一页
-        </button>
-        <span className="tool-divider" />
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewModel.zoomOut()}
-        >
-          −
-        </button>
-        <span className="zoom-label">{zoomPercent}%</span>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewModel.zoomIn()}
-        >
-          +
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewerRef.current?.fitWidth()}
-        >
-          适应宽度
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          onClick={() => viewModel.setZoom(1)}
-        >
-          100%
-        </button>
-        <span className="tool-divider" />
-        <span className="tool-group-label">页面编辑</span>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="当前页或选中页逆时针旋转 90°"
-          onClick={() => void viewModel.rotate(-90)}
-        >
-          ↺ 90°
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="当前页或选中页顺时针旋转 90°"
-          onClick={() => void viewModel.rotate(90)}
-        >
-          ↻ 90°
-        </button>
-        <button
-          className="tool-button"
-          type="button"
-          disabled={!hasDocument}
-          title="当前页或选中页旋转 180°"
-          onClick={() => void viewModel.rotate(180)}
-        >
-          180°
-        </button>
-        <button
-          className="tool-button danger"
-          type="button"
-          disabled={!hasDocument || state.pageCount <= 1}
-          title={state.pageCount <= 1 ? '只有一页，无法删除' : '删除当前页或选中页'}
-          onClick={() => void viewModel.deleteSelectedPages()}
-        >
-          删除页
-        </button>
-      </div>
-
-      <div className="tab-bar">
-        {state.tabs.length === 0 ? (
-          <span className="tab-empty">暂无打开的文档</span>
-        ) : (
-          state.tabs.map((tab) => (
-            <div
-              key={tab.documentId}
-              className={tab.documentId === state.activeDocumentId ? 'tab active' : 'tab'}
-              onClick={() => viewModel.selectDocument(tab.documentId)}
-            >
-              <span className="tab-title" title={tab.title}>
-                {tab.title}
-              </span>
-              <button
-                className="tab-close"
-                type="button"
-                aria-label={`关闭 ${tab.title}`}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void viewModel.closeTab(tab.documentId);
-                }}
-              >
-                ×
-              </button>
-            </div>
-          ))
-        )}
-      </div>
-
-      <div className="workspace">
-        <aside className="thumbnail-panel">
-          <div className="panel-heading">文档信息</div>
-          {hasDocument ? (
-            <dl className="doc-info">
-              <dt>标题</dt>
-              <dd>{state.activeTitle || '—'}</dd>
-              <dt>作者</dt>
-              <dd>{state.author || '—'}</dd>
-              <dt>页数</dt>
-              <dd>{state.pageCount}</dd>
-              <dt>当前页</dt>
-              <dd>{state.currentPage}</dd>
-              <dt>缩放</dt>
-              <dd>{zoomPercent}%</dd>
-            </dl>
-          ) : null}
-          {hasDocument ? (
-            <div className="thumbnail-section">
-              <div className="panel-heading">页面（可拖拽排序）</div>
-              <div className="thumbnail-list">
-                {state.pageOrder.map((original, index) => (
-                  <div
-                    key={`${state.layoutRevision}-${original}`}
-                    className={
-                      state.selectedPages.includes(index + 1)
-                        ? 'thumbnail-item selected'
-                        : 'thumbnail-item'
-                    }
-                    draggable
-                    onDragStart={(event) => {
-                      event.dataTransfer.setData('text/plain', String(index + 1));
-                    }}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const from = Number(event.dataTransfer.getData('text/plain'));
-                      if (Number.isFinite(from) && from > 0 && from !== index + 1) {
-                        void viewModel.movePage(from, index + 1);
-                      }
-                    }}
-                    onClick={(event) => {
-                      const mode = event.shiftKey
-                        ? 'range'
-                        : event.ctrlKey || event.metaKey
-                          ? 'toggle'
-                          : 'replace';
-                      void viewModel.selectPages([index + 1], mode);
-                    }}
-                  >
-                    <span className="thumbnail-no">{index + 1}</span>
-                    <span className="thumbnail-original">原第 {original} 页</span>
-                    {(state.rotations[original] ?? 0) !== 0 ? (
-                      <span className="thumbnail-rot">{state.rotations[original]}°</span>
-                    ) : null}
-                  </div>
-                ))}
-              </div>
-              <button
-                className="tool-button"
-                type="button"
-                onClick={() => void viewModel.clearSelection()}
-              >
-                清空选择
-              </button>
-            </div>
-          ) : null}
-          {!hasDocument ? (
-            <div className="panel-empty">尚未打开文档</div>
-          ) : null}
-        </aside>
-
-        <main className="document-area">
-          <PdfViewer
-            ref={viewerRef}
-            documentId={state.activeDocumentId}
-            zoom={state.zoom}
-            currentPage={state.currentPage}
-            onPageCount={handlePageCount}
-            onPageChange={handlePageChange}
-            onScroll={handleScroll}
-            onFitZoom={handleFitZoom}
-            onError={handleError}
+  const activePanel = (() => {
+    switch (workspace) {
+      case 'pages':
+        return (
+          <PagesPanel
+            hasDocument={hasDocument}
             pageOrder={state.pageOrder}
             rotations={state.rotations}
             selectedPages={state.selectedPages}
+            currentPage={state.currentPage}
             layoutRevision={state.layoutRevision}
-            saveRevision={state.saveRevision}
-            onSelectPage={(page, mode) => void viewModel.selectPages([page], mode)}
+            onSelectPages={(pages, selectMode) => void viewModel.selectPages(pages, selectMode)}
+            onMovePage={(from, to) => void viewModel.movePage(from, to)}
+            onClearSelection={() => void viewModel.clearSelection()}
           />
-        </main>
+        );
+      case 'objects':
+        return (
+          <ObjectsPanel
+            hasDocument={hasDocument}
+            tree={state.objectTree}
+            loading={state.objectTreeLoading}
+            error={state.objectTreeError}
+            focusedObjectId={focusedObject?.object_id ?? null}
+            expanded={expandedNodes}
+            onToggle={(id) =>
+              setExpandedNodes((current) =>
+                current.includes(id) ? current.filter((item) => item !== id) : [...current, id],
+              )
+            }
+            onFocusObject={setFocusedObject}
+            onLocatePage={goToPage}
+          />
+        );
+      case 'bookmarks':
+        return <BookmarksPanel />;
+      case 'outline':
+        return <OutlinePanel />;
+      case 'attachments':
+        return <AttachmentsPanel />;
+      case 'ocr':
+        return <OcrPanel />;
+      case 'annotation':
+        return <AnnotationPanel />;
+      case 'ai':
+        return <AiPanel />;
+      default:
+        return <PagesPanel
+          hasDocument={hasDocument}
+          pageOrder={state.pageOrder}
+          rotations={state.rotations}
+          selectedPages={state.selectedPages}
+          currentPage={state.currentPage}
+          layoutRevision={state.layoutRevision}
+          onSelectPages={(pages, selectMode) => void viewModel.selectPages(pages, selectMode)}
+          onMovePage={(from, to) => void viewModel.movePage(from, to)}
+          onClearSelection={() => void viewModel.clearSelection()}
+        />;
+    }
+  })();
+
+  return (
+    <div className="dw-app">
+      <TitleBar
+        appTitle={state.title}
+        documentTitle={hasDocument ? state.activeTitle : ''}
+        dirty={state.dirty}
+        edition={state.edition}
+        version={state.version}
+        recoveryAvailable={state.recoveryAvailable}
+      />
+
+      <Ribbon
+        activeTab={ribbonTab}
+        onTabChange={setRibbonTab}
+        hasDocument={hasDocument}
+        pageCount={state.pageCount}
+        canUndo={state.canUndo}
+        canRedo={state.canRedo}
+        mode={mode}
+        onModeChange={setMode}
+        theme={theme}
+        onThemeChange={setTheme}
+        onOpen={() => void viewModel.openFile()}
+        onSave={() => void viewModel.save()}
+        onSaveAs={() => void viewModel.saveAs()}
+        onUndo={() => void viewModel.undo()}
+        onRedo={() => void viewModel.redo()}
+        onRotate={(delta) => void viewModel.rotate(delta)}
+        onDeletePages={() => void viewModel.deleteSelectedPages()}
+        onZoomIn={() => viewModel.zoomIn()}
+        onZoomOut={() => viewModel.zoomOut()}
+        onFitWidth={() => viewerRef.current?.fitWidth()}
+        onActualSize={() => viewModel.setZoom(1)}
+        onFullscreen={toggleFullscreen}
+      />
+
+      <div className="dw-main">
+        <WorkspaceNav
+          active={workspace}
+          onActiveChange={setWorkspace}
+          collapsed={navCollapsed}
+          onToggleCollapsed={() => setNavCollapsed((value) => !value)}
+          width={navWidth}
+          onWidthChange={setNavWidth}
+        >
+          {activePanel}
+        </WorkspaceNav>
+
+        <div className="dw-center">
+          <DocumentTabs
+            tabs={state.tabs}
+            activeDocumentId={state.activeDocumentId}
+            onSelect={(documentId) => void viewModel.selectDocument(documentId)}
+            onClose={(documentId) => void viewModel.closeTab(documentId)}
+          />
+          <div className="dw-canvas">
+            <PdfViewer
+              ref={viewerRef}
+              documentId={state.activeDocumentId}
+              zoom={state.zoom}
+              currentPage={state.currentPage}
+              onPageCount={handlePageCount}
+              onPageChange={handlePageChange}
+              onScroll={handleScroll}
+              onFitZoom={handleFitZoom}
+              onError={handleError}
+              pageOrder={state.pageOrder}
+              rotations={state.rotations}
+              selectedPages={state.selectedPages}
+              layoutRevision={state.layoutRevision}
+              saveRevision={state.saveRevision}
+              onSelectPage={(page, selectMode) => void viewModel.selectPages([page], selectMode)}
+              overlayPages={overlayPages}
+              focusedObjectId={focusedObject?.object_id ?? null}
+              mode={mode}
+            />
+            <ToastStack toasts={toasts} onDismiss={dismiss} />
+          </div>
+        </div>
+
+        <Inspector
+          hasDocument={hasDocument}
+          document={{
+            title: state.activeTitle,
+            author: state.author,
+            pageCount: state.pageCount,
+            fileSize: state.fileSize,
+            path: state.sourcePath,
+            dirty: state.dirty,
+            lastSavedAt: state.lastSavedAt,
+            parserText,
+          }}
+          focusedObject={focusedObject}
+          focusedPageRotation={
+            focusedObject ? (state.rotations[focusedObject.page] ?? 0) : null
+          }
+          formatSize={(bytes) => (bytes > 0 ? formatSize(bytes) : '—')}
+        />
       </div>
 
-      <footer className="status-bar">
-        <span className="status-text">{state.status}</span>
-        {state.lastSavedAt ? <span className="task-event">已保存：{state.lastSavedAt}</span> : null}
-        {state.taskEvent ? <span className="task-event">{state.taskEvent}</span> : null}
-        {state.error ? <span className="status-error">{state.error}</span> : null}
-      </footer>
+      <StatusBar
+        zoomPercent={zoomPercent}
+        page={state.currentPage}
+        pageCount={state.pageCount}
+        selectionText={selectionText}
+        modeText={MOUSE_MODE_LABELS[mode]}
+        dirty={state.dirty}
+        ocrText="OCR 未接入"
+        aiText="AI 未接入"
+        memoryText="—"
+        parserText={parserText}
+        saveText={saveText}
+        taskEvent={state.taskEvent}
+        error={state.error}
+        onGoToPage={goToPage}
+      />
     </div>
   );
 }

@@ -16,6 +16,7 @@ import {
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { readDocumentBytes } from '../ipc';
+import { PageOverlays, type OverlayObject } from './overlay';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -38,6 +39,16 @@ export interface PdfViewerHandle {
   goToPage(page: number): void;
   /** 按容器宽度计算缩放比例并回报。 */
   fitWidth(): void;
+}
+
+/** 单页 Overlay 数据：对象树投影里属于该页的几何与对象。 */
+export interface PageOverlayData {
+  /** 页宽（PDF 点）。 */
+  pageWidth: number;
+  /** 页高（PDF 点）。 */
+  pageHeight: number;
+  /** 本页参与高亮的对象。 */
+  objects: OverlayObject[];
 }
 
 /** Viewer 属性：所有状态由外部（ViewModel）传入，Viewer 不持有真值。 */
@@ -70,6 +81,12 @@ interface PdfViewerProps {
   saveRevision: number;
   /** 点击页面写入 Session.selection。 */
   onSelectPage: (page: number, mode: 'replace' | 'toggle' | 'range') => void;
+  /** 逐页 Overlay 数据（键为原始页码）；为空时不画对象框。 */
+  overlayPages?: Record<number, PageOverlayData>;
+  /** 当前聚焦对象 id：只影响高亮，不写 Selection 真值。 */
+  focusedObjectId?: number | null;
+  /** 鼠标模式：决定编辑层是否激活与画布光标。 */
+  mode?: string;
 }
 
 /** 单页 canvas：进入视口才渲染，离开后保留画布避免反复重绘。 */
@@ -177,6 +194,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     layoutRevision,
     saveRevision,
     onSelectPage,
+    overlayPages,
+    focusedObjectId = null,
+    mode = 'browse',
   },
   ref,
 ) {
@@ -368,7 +388,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     return (
       <div className="viewer-empty">
         <div className="document-empty">尚未打开文档</div>
-        <div className="document-hint">点击工具栏「打开 PDF」，或按 Ctrl+O。</div>
+        <div className="document-hint">点击「开始 → 打开」，或按 Ctrl+O。</div>
         <div className="document-hint">打开后可旋转 / 删除 / 移动页面，并支持撤销重做。</div>
       </div>
     );
@@ -392,7 +412,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   }
 
   return (
-    <div className="pdf-viewer" ref={containerRef} onScroll={handleScroll}>
+    <div className="pdf-viewer" ref={containerRef} data-mode={mode} onScroll={handleScroll}>
       <div className="pdf-pages">
         {pageBoxes.map((box, index) => (
           <div
@@ -412,6 +432,14 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               width={box.width}
               height={box.height}
               rotation={box.rotation}
+            />
+            <PageOverlays
+              pageWidth={overlayPages?.[box.original]?.pageWidth ?? baseSize.width}
+              pageHeight={overlayPages?.[box.original]?.pageHeight ?? baseSize.height}
+              rotation={box.rotation}
+              objects={overlayPages?.[box.original]?.objects ?? []}
+              focusedObjectId={focusedObjectId}
+              editing={mode === 'edit'}
             />
           </div>
         ))}

@@ -244,6 +244,55 @@ export async function canRedo(): Promise<boolean> {
   return invoke<boolean>('can_redo');
 }
 
+/** 对象节点：Objects Workspace 的叶子，Inspector 的数据源（规范 16 C-8，只读）。 */
+export interface ObjectNodeInfo {
+  object_id: number;
+  page: number;
+  /** 对象种类英文枚举名（Text / Image / Path / Unknown 等）。 */
+  kind: string;
+  /** 对象种类中文文案。 */
+  kind_label: string;
+  /** PDF 坐标边界 [x, y, width, height]，原点左下。 */
+  bbox: [number, number, number, number];
+  z_index: number;
+  stream_ref: number | null;
+  lifecycle: string;
+  version: number;
+  font_id: string | null;
+  font_size: number | null;
+  unicode: string | null;
+  glyph_count: number;
+}
+
+/** 单页对象：Objects Workspace 第一层。 */
+export interface ObjectPageInfo {
+  page: number;
+  /** 页宽（PDF 点），Overlay 坐标映射用。 */
+  page_width: number;
+  /** 页高（PDF 点），Overlay 坐标映射用。 */
+  page_height: number;
+  object_count: number;
+  objects: ObjectNodeInfo[];
+}
+
+/** 对象树投影：一次返回整篇结构。 */
+export interface ObjectTreeInfo {
+  document_id: number;
+  page_count: number;
+  object_count: number;
+  pages: ObjectPageInfo[];
+  warnings: string[];
+}
+
+/**
+ * 读取对象树投影：后端走 `PDF → Parser → ObjectMapper → ObjectTree`，只读不写盘。
+ *
+ * 这是 Objects Workspace 与 Inspector 的唯一数据源；UI 不得自己解析 PDF。
+ */
+export async function getObjectTree(documentId: number): Promise<ObjectTreeInfo> {
+  return invoke<ObjectTreeInfo>('get_object_tree', { documentId });
+}
+
 /** 保存结果：对应后端 SaveInfo；蛇形字段直接透传，不改驼峰。 */
 export interface SaveInfo {
   document_id: number;
