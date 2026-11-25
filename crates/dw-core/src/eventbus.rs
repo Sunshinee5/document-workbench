@@ -54,6 +54,25 @@ pub enum EventPayload {
         /// 中文失败原因。
         reason: String,
     },
+    /// `ContentRewriteStarted`：内容流重写开始（`14` §七）。
+    ContentRewriteStarted {
+        /// 目标页原始页码。
+        page: u32,
+    },
+    /// `ContentRewriteFinished`：内容流重写成功。
+    ContentRewriteFinished {
+        /// 目标页原始页码。
+        page: u32,
+        /// 输出 Operator 数量。
+        operator_count: usize,
+    },
+    /// `ContentRewriteFailed`：内容流重写失败。
+    ContentRewriteFailed {
+        /// 目标页原始页码。
+        page: u32,
+        /// 中文失败原因。
+        reason: String,
+    },
 }
 
 /// 事件对象：承载事件种类、中文描述与可选结构化载荷。
@@ -171,6 +190,42 @@ impl Event {
         )
         .with_payload(EventPayload::FontRewriteFailed {
             object_id,
+            reason: reason.to_string(),
+        })
+    }
+
+    /// `ContentRewriteStarted`（`14` §七）：内容流重写开始。
+    pub fn content_rewrite_started(page: u32) -> Self {
+        Self::new(
+            "ContentRewriteStarted",
+            format!("开始内容流重写：第 {} 页", page),
+        )
+        .with_payload(EventPayload::ContentRewriteStarted { page })
+    }
+
+    /// `ContentRewriteFinished`（`14` §七）：内容流重写成功。
+    pub fn content_rewrite_finished(page: u32, operator_count: usize) -> Self {
+        Self::new(
+            "ContentRewriteFinished",
+            format!(
+                "内容流重写完成：第 {} 页，{} 个 Operator",
+                page, operator_count
+            ),
+        )
+        .with_payload(EventPayload::ContentRewriteFinished {
+            page,
+            operator_count,
+        })
+    }
+
+    /// `ContentRewriteFailed`（`14` §七）：内容流重写失败。
+    pub fn content_rewrite_failed(page: u32, reason: &str) -> Self {
+        Self::new(
+            "ContentRewriteFailed",
+            format!("内容流重写失败：第 {} 页（{}）", page, reason),
+        )
+        .with_payload(EventPayload::ContentRewriteFailed {
+            page,
             reason: reason.to_string(),
         })
     }

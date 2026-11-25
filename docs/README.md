@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          14 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          15 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -26,7 +26,7 @@ docs/
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 十四份规范
+## 十五份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|
@@ -44,6 +44,7 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
 | `spec/11-Selection-Engine-R1.md` | **18-05 Selection Engine**：唯一选择状态引擎、SelectionState/Primary/Multi/Snapshot、SelectionChanged、版本一致性、ST-01~08 | 实现 18-05 及 Text Editing / Annotation / OCR / AI 前 |
 | `spec/12-Editing-Engine-R1.md` | **18-06 Editing Engine**：唯一编辑事务、EditingSession/WorkingCopy/Commit、Validation 四检、VersionConflict、对象级 Diff 回放、ET-01~08 | 实现 18-06 及 Text Editing / Annotation / Form 前 |
 | `spec/13-Font-Rewrite-Engine-R1.md` | **18-07 Font Rewrite Engine**：FontRegistry 唯一字体真值、Unicode→Glyph、Subset Planning、FontPatch、MissingGlyph、FT-01~08 | 实现 18-07 / 18-08 Content Stream Rewrite 前 |
+| `spec/14-Content-Stream-Rewrite-R1.md` | **18-08 Content Stream Rewrite**：唯一 Operator 重写引擎、Unknown 100% 保留、Operator 顺序冻结、ContentPatch 唯一输出、CT-01~11 | 实现 18-08 / 18-09 集成前 |
 
 ## 指南（无规范权）
 
@@ -79,7 +80,8 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
   > 11 Selection Engine（唯一选择状态引擎）
   > 12 Editing Engine（唯一编辑事务）
   > 13 Font Rewrite Engine（唯一字体重写引擎）
-  > 14+ Implementation Spec / features/（无架构裁定权）
+  > 14 Content Stream Rewrite（唯一 Operator 重写引擎）
+  > 15+ Implementation Spec / features/（无架构裁定权）
   > 13+ Implementation Guide / guides/（无规范权）
   > records/（仅溯源）> archive/（全部作废）
 ```

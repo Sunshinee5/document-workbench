@@ -6,6 +6,7 @@
 //! Stage 2 范围：读取元数据（标题 / 作者 / 页数 / 文件大小 / 修改时间）。
 //! Stage 3 才做结构编辑（旋转 / 删页 / 合并 / 拆分）。
 
+pub mod content_rewrite;
 pub mod content_stream;
 pub mod edit;
 pub mod intermediate;

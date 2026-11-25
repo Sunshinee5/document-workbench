@@ -294,6 +294,8 @@ Session       → crates/dw-core/src/session.rs
 | `FontRegistry` / `FontDescriptor` / `FontEncoding` | `crates/dw-core/src/font.rs` / `document.rs` | 已落地（`13` 18-07；Document 内唯一字体真值，Engine 只读） |
 | `GlyphMapping` / `SubsetPlan` / `SubsetStrategy` / `FontPatch` / `FontRewriteEngine` / `FontRewriteError` | `crates/dw-core/src/font.rs` | 已落地（`13` 18-07；唯一输出 FontPatch，由 18-08 消费） |
 | `FontRef` 派生 Ord / Hash | `crates/dw-core/src/object.rs` | 已落地（`13` 18-07 C-6；补派生不改字段与身份语义） |
+| `PdfOperand` / `PdfOperator` / `StreamPatch` / `ContentPatch` / `RewriteRequest` | `crates/dw-core/src/content.rs` | 已落地（`14` 18-08；中性 Operator 值对象，Save 消费 ContentPatch） |
+| `ContentRewriteEngine` / `RewriteError` | `crates/dw-pdf/src/content_rewrite.rs` | 已落地（`14` 18-08；唯一 Operator 重写入口，不写 PDF、不重新解析字体） |
 | `Page::version()` / `SpatialIndex::version()` / `PageIndexCache::version()` | `crates/dw-core/src/page.rs` / `hittest.rs` | 已落地（`11` 18-05；`page_version` 为派生值不落字段，`index_version` 属运行时优化） |
 | `SessionState` / `DocumentStore` / `CommandRecord` / `History` / `Session` / `SessionId` / `SessionManager` / `CheckpointStore` | `crates/dw-core/src/session.rs` | 已落地（Session 成员固定 6 项，含 `CheckpointStore`） |
 | `SavePoint` + `Session.save_point` | `crates/dw-core/src/session.rs` | 已落地（Feature-04） |

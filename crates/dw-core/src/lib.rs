@@ -8,6 +8,7 @@ pub mod capability;
 pub mod checkpoint;
 pub mod clipboard;
 pub mod command;
+pub mod content;
 pub mod context;
 pub mod coordinate;
 pub mod diff;
