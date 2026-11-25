@@ -14,10 +14,13 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use dw_core::content::ContentPatch;
 use dw_core::document::{Document, PageLayout};
 use dw_core::driver::{ISave, SaveOutcome, PDF_DRIVER};
 use dw_core::error::DriverError;
 use lopdf::{Document as LopdfDocument, IncrementalDocument, Object, ObjectId};
+
+use crate::content_rewrite::encode_operators;
 
 /// 外部文件修改时间比较容差（毫秒）：保存后 Task 写入的 `modified_time` 是内存时钟，
 /// 与文件系统时间戳存在毫秒级偏差，不能据此误判为「外部改写」而放弃增量。
@@ -246,6 +249,47 @@ struct StagedChanges {
     root: ObjectId,
     /// 已应用变更的 lopdf 文档（全量写直接用它，增量写取其中变更对象）。
     pdf: LopdfDocument,
+    /// `stage_content_patch()` 改过的内容流 xref；增量写必须一并搬运。
+    content_object_ids: Vec<ObjectId>,
+}
+
+/// 定位页的 `/Contents` 流对象：支持单个 Reference 与 Reference 数组；
+/// 数组按 `patch.stream_ref` 精确匹配，找不到时报中文错误，绝不猜测。
+fn resolve_content_xref(
+    pdf: &LopdfDocument,
+    page_xref: ObjectId,
+    stream_ref: Option<u64>,
+) -> Result<ObjectId, DriverError> {
+    let page = pdf
+        .get_object(page_xref)
+        .map_err(|error| driver_error(format!("读取页对象失败：{}", error)))?;
+    let dict = page
+        .as_dict()
+        .map_err(|_| driver_error(format!("对象 {} 不是页字典", page_xref.0)))?;
+    let contents = dict
+        .get(b"Contents")
+        .map_err(|_| driver_error(format!("第 {} 页没有 /Contents", page_xref.0)))?;
+    match contents {
+        Object::Reference(id) => Ok(*id),
+        Object::Array(items) => {
+            for item in items {
+                if let Object::Reference(id) = item {
+                    if stream_ref.is_none_or(|expected| u64::from(id.0) == expected) {
+                        return Ok(*id);
+                    }
+                }
+            }
+            Err(driver_error(format!(
+                "找不到内容流 {}（页对象 {}）",
+                stream_ref.unwrap_or_default(),
+                page_xref.0
+            )))
+        }
+        other => Err(driver_error(format!(
+            "不支持的 /Contents 形态：{:?}",
+            other
+        ))),
+    }
 }
 
 /// PDF 保存器：`PdfDriver` 通过 `ISave` 暴露它，不是新 Driver、不是新层。
@@ -275,6 +319,38 @@ impl PdfSaver {
         self.staged
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// AD-25：Save 消费 `ContentPatch` 的唯一入口。
+    ///
+    /// 只把补丁里已有的 `PdfOperator` 序列化进暂存 lopdf 的内容流，**不新建 Operator、
+    /// 不调用 ObjectMapper、不重新解析字体**（AD-28）。暂存由后续 `save()` 取走并释放，
+    /// Patch 不进 History / Snapshot / 持久化（AD-27）。
+    pub fn stage_content_patch(&self, patch: &ContentPatch) -> Result<(), DriverError> {
+        let mut guard = self.staged_lock();
+        let Some(staged) = guard.as_mut() else {
+            return Err(driver_error(
+                "Save 尚未暂存 PDF 变更，请先调用 apply_changes()",
+            ));
+        };
+        let page_number = patch.page_id.raw();
+        let page_xref = *staged.page_ids.get(&page_number).ok_or_else(|| {
+            driver_error(format!("ContentPatch 指向不存在的第 {} 页", page_number))
+        })?;
+        let stream_xref = resolve_content_xref(&staged.pdf, page_xref, patch.stream_ref)?;
+        let bytes = encode_operators(&patch.operators)
+            .map_err(|error| driver_error(format!("ContentPatch 序列化失败：{}", error)))?;
+        let object = staged.pdf.get_object_mut(stream_xref).map_err(|error| {
+            driver_error(format!("读取内容流 {} 失败：{}", stream_xref.0, error))
+        })?;
+        let stream = object
+            .as_stream_mut()
+            .map_err(|_| driver_error(format!("对象 {} 不是内容流", stream_xref.0)))?;
+        stream.set_content(bytes);
+        if !staged.content_object_ids.contains(&stream_xref) {
+            staged.content_object_ids.push(stream_xref);
+        }
+        Ok(())
     }
 
     /// 取出当前暂存；不存在或已过期时回退调用 `apply_changes()`（防御式，不改变链路）。
@@ -331,6 +407,7 @@ impl PdfSaver {
             .filter_map(|number| staged.page_ids.get(number).copied())
             .collect();
         changed.push(staged.root);
+        changed.extend(staged.content_object_ids.iter().copied());
         changed.sort();
         changed.dedup();
         for object_id in changed {
@@ -435,6 +512,7 @@ impl ISave for PdfSaver {
             page_ids,
             root,
             pdf,
+            content_object_ids: Vec::new(),
         };
         *self.staged_lock() = Some(staged);
         dw_log::info(

@@ -568,6 +568,7 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | Editing Engine（18-06） | `crates/dw-core/src/editing.rs` / `diff.rs` / `eventbus.rs` | `EditingEngine` / `EditingSession` / `EditingState` / `EditingOperation` / `EditingError` / `Diff::apply_object` / `Diff::revert_object` | 已落地（18-06） |
 | Font Rewrite Engine（18-07） | `crates/dw-core/src/font.rs` / `document.rs` / `eventbus.rs` | `FontRegistry` / `FontDescriptor` / `FontPatch` / `FontRewriteEngine` / `Document.font_registry` | 已落地（18-07） |
 | Content Rewrite Engine（18-08） | `crates/dw-core/src/content.rs` / `crates/dw-pdf/src/content_rewrite.rs` | `PdfOperator` / `ContentPatch` / `RewriteRequest` / `ContentRewriteEngine` | 已落地（18-08） |
+| Integration（18-09） | `crates/dw-pdf/src/save.rs` / `tests/integration_tests.rs` | `PdfSaver::stage_content_patch()` / `StagedChanges.content_object_ids` / IT-01~10 | 已落地（18-09；**Object Editing 正式冻结**） |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |
 | EventBus | `crates/dw-core/src/eventbus.rs` | `EventBus` / `Event` | 已落地 |
 | 错误 | `crates/dw-core/src/error.rs` | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | 已落地 |
