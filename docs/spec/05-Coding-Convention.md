@@ -288,7 +288,9 @@ Session       → crates/dw-core/src/session.rs
 | `Selection` | `crates/dw-core/src/selection.rs` | 已落地（`pages` + `anchor`；对象轨道 18-05 已迁出到 `SelectionState`） |
 | `SelectionState` / `SelectionVersion` / `SelectionSnapshot` | `crates/dw-core/src/selection.rs` | 已落地（`11` 18-05；**唯一对象选择真值**，属 Session，只存 `ObjectId`） |
 | `SelectionEngine` / `SelectionHistory` / `SelectionCommand` / `SelectionRequest` / `SelectionPolicy` / `ModifierKeys` / `SelectionChange` / `SelectionValidation` | `crates/dw-core/src/selection.rs` | 已落地（`11` 18-05；唯一修改入口，不持有 EventBus、不调用 HitTest） |
-| `EventPayload` | `crates/dw-core/src/eventbus.rs` | 已落地（`11` 18-05；`SelectionChanged` 携带 old/new） |
+| `EventPayload` | `crates/dw-core/src/eventbus.rs` | 已落地（`11` 18-05 起 `SelectionChanged`；`12` 18-06 追加三类编辑事件） |
+| `EditingEngine` / `EditingSession` / `EditingState` / `EditingRequest` / `EditingOperation` / `EditingCommit` / `EditingCancelReason` / `EditingError` | `crates/dw-core/src/editing.rs` | 已落地（`12` 18-06；唯一编辑事务，Commit 是唯一写入口） |
+| `Diff::apply_object()` / `Diff::revert_object()` | `crates/dw-core/src/diff.rs` | 已落地（`12` 18-06；对象级 Diff 只对 `Page` 回放，`Document` 不含对象树） |
 | `Page::version()` / `SpatialIndex::version()` / `PageIndexCache::version()` | `crates/dw-core/src/page.rs` / `hittest.rs` | 已落地（`11` 18-05；`page_version` 为派生值不落字段，`index_version` 属运行时优化） |
 | `SessionState` / `DocumentStore` / `CommandRecord` / `History` / `Session` / `SessionId` / `SessionManager` / `CheckpointStore` | `crates/dw-core/src/session.rs` | 已落地（Session 成员固定 6 项，含 `CheckpointStore`） |
 | `SavePoint` + `Session.save_point` | `crates/dw-core/src/session.rs` | 已落地（Feature-04） |

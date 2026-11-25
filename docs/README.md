@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          12 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          13 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -26,7 +26,7 @@ docs/
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 十二份规范
+## 十三份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|
@@ -42,6 +42,7 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
 | `spec/09-PDF-Object-Mapper-R1.md` | **18-03 Object Mapper**：唯一双向对象映射层、ParseResult/ParseReport、SchemaVersion、Lifecycle/Version 同步、Round Trip 核心验收、MT-01~08 | 实现 18-03 及后续所有 18 章节前 |
 | `spec/10-HitTest-Engine-R1.md` | **18-04 HitTest Engine**：唯一命中检测入口、Coordinate Converter、Spatial Index、Priority Resolver、多命中/Hover/Drag Begin、HT-01~08 | 实现 18-04 及 Selection / Text Editing 前 |
 | `spec/11-Selection-Engine-R1.md` | **18-05 Selection Engine**：唯一选择状态引擎、SelectionState/Primary/Multi/Snapshot、SelectionChanged、版本一致性、ST-01~08 | 实现 18-05 及 Text Editing / Annotation / OCR / AI 前 |
+| `spec/12-Editing-Engine-R1.md` | **18-06 Editing Engine**：唯一编辑事务、EditingSession/WorkingCopy/Commit、Validation 四检、VersionConflict、对象级 Diff 回放、ET-01~08 | 实现 18-06 及 Text Editing / Annotation / Form 前 |
 
 ## 指南（无规范权）
 
@@ -75,7 +76,8 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
   > 09 PDF Object Mapper（唯一双向映射层，Round Trip 门槛）
   > 10 HitTest Engine（唯一命中检测入口）
   > 11 Selection Engine（唯一选择状态引擎）
-  > 12+ Implementation Spec / features/（无架构裁定权）
+  > 12 Editing Engine（唯一编辑事务）
+  > 13+ Implementation Spec / features/（无架构裁定权）
   > 13+ Implementation Guide / guides/（无规范权）
   > records/（仅溯源）> archive/（全部作废）
 ```

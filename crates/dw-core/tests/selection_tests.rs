@@ -87,7 +87,10 @@ fn last_selection_change(events: &EventBus) -> Option<(SelectionState, Selection
         .rev()
         .find(|event| event.kind == "SelectionChanged")
         .and_then(|event| event.payload.as_ref())
-        .map(|EventPayload::Selection(change)| (change.old.clone(), change.new.clone()))
+        .and_then(|payload| match payload {
+            EventPayload::Selection(change) => Some((change.old.clone(), change.new.clone())),
+            _ => None,
+        })
 }
 
 fn selection_event_count(events: &EventBus) -> usize {

@@ -9,7 +9,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{Document, PageLayout};
 use crate::error::DwError;
-use crate::object::ObjectId;
+use crate::object::{Object, ObjectId};
+use crate::page::Page;
 
 /// Diff 引用：指向 `Recovery/session-XXX/diffs/` 下的具体文件。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +140,51 @@ impl Diff {
             )),
         }
     }
+
+    /// 对象级 Diff 的正向回放（`12` §十九 C-4）：Redo 走这里。
+    ///
+    /// 对象挂在 `Page` 上，`Document` 不含对象树，因此对象级 Diff **只对 Page 回放**。
+    pub fn apply_object(&self, page: &mut Page) -> Result<(), DwError> {
+        self.replay_object(page, true)
+    }
+
+    /// 对象级 Diff 的反向回放（`12` §十九 C-4 / C-5）：Undo 走这里。
+    ///
+    /// 恢复 `before` 整份快照（含 `version`）——回放必须与 Diff 完全对称，
+    /// 单调递增只约束编辑动作，不约束回放。
+    pub fn revert_object(&self, page: &mut Page) -> Result<(), DwError> {
+        self.replay_object(page, false)
+    }
+
+    /// 对象级回放实现：`forward = true` 取 `after`，否则取 `before`。
+    fn replay_object(&self, page: &mut Page, forward: bool) -> Result<(), DwError> {
+        let Diff::Structure(structure) = self else {
+            return Err(DwError::Execution(
+                "二进制 Diff 不支持对象级回放".to_string(),
+            ));
+        };
+        if structure.operation != "ObjectChange" {
+            return Err(DwError::Execution(format!(
+                "非对象级 Diff 不能对 Page 回放：{}",
+                structure.operation
+            )));
+        }
+        let payload: ObjectDiffPayload = decode(&structure.payload)?;
+        let snapshot = if forward {
+            &payload.after
+        } else {
+            &payload.before
+        };
+        let object: Object = serde_json::from_value(snapshot.clone()).map_err(|error| {
+            DwError::Execution(format!(
+                "对象快照损坏（对象 {}）：{}",
+                payload.object_id.raw(),
+                error
+            ))
+        })?;
+        page.insert_object(object);
+        Ok(())
+    }
 }
 
 /// 角度归一到 0 / 90 / 180 / 270。
@@ -169,10 +215,10 @@ fn apply_structure(document: &Document, diff: &StructureDiff) -> Result<(), DwEr
             move_page(&mut layout, payload.from, payload.to)?;
         }
         "ObjectChange" => {
-            // 对象级回放不改 PageLayout，先解码校验载荷，再明确报告「待后续章节实现」。
+            // Document 不含对象树（Object 挂在 Page 上），对象级 Diff 必须对 Page 回放。
             let payload: ObjectDiffPayload = decode(&diff.payload)?;
             return Err(DwError::Execution(format!(
-                "对象级 Diff 回放待 18-02（对象 {}，版本 {} → {}）",
+                "对象级 Diff 不能对 Document 回放，请用 Diff::apply_object(&mut Page)（对象 {}，版本 {} → {}）",
                 payload.object_id.raw(),
                 payload.before_version,
                 payload.after_version
@@ -203,7 +249,7 @@ fn revert_structure(document: &Document, diff: &StructureDiff) -> Result<(), DwE
         "ObjectChange" => {
             let payload: ObjectDiffPayload = decode(&diff.payload)?;
             return Err(DwError::Execution(format!(
-                "对象级 Diff 反向回放待 18-02（对象 {}，版本 {} → {}）",
+                "对象级 Diff 不能对 Document 反向回放，请用 Diff::revert_object(&mut Page)（对象 {}，版本 {} → {}）",
                 payload.object_id.raw(),
                 payload.before_version,
                 payload.after_version
@@ -350,13 +396,14 @@ mod tests {
             crate::document::DocumentKind::Pdf,
             crate::capability::CapabilitySet::new(),
         );
+        // Document 不含对象树，对象级 Diff 必须走 Page 回放（`12` §十九 C-4）。
         let error = diff
             .apply(&document)
-            .expect_err("本章对象级回放应返回待实现");
-        assert!(error.to_string().contains("18-02"));
+            .expect_err("对象级 Diff 不能对 Document 回放");
+        assert!(error.to_string().contains("apply_object"));
         let error = diff
             .revert(&document)
-            .expect_err("本章对象级反向回放应返回待实现");
-        assert!(error.to_string().contains("18-02"));
+            .expect_err("对象级 Diff 不能对 Document 反向回放");
+        assert!(error.to_string().contains("revert_object"));
     }
 }

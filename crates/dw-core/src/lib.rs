@@ -13,6 +13,7 @@ pub mod coordinate;
 pub mod diff;
 pub mod document;
 pub mod driver;
+pub mod editing;
 pub mod error;
 pub mod eventbus;
 pub mod hittest;

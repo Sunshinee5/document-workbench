@@ -1,15 +1,40 @@
 //! EventBus 横切事件总线，不进入执行链；Task 完成等通知经此发布，UI 只监听不直调 Task。
 
+use crate::editing::EditingCancelReason;
+use crate::object::ObjectId;
 use crate::selection::SelectionChange;
 
-/// 事件结构化载荷（`11` §十）。
+/// 事件结构化载荷（`11` §十 / `12` §十五）。
 ///
-/// `Event` 原本只有种类与中文描述；`SelectionChanged` 必须携带
-/// `old_selection` / `new_selection`，故用可选载荷承载，避免监听方再去反解文案。
+/// `Event` 原本只有种类与中文描述；`SelectionChanged` 与三类编辑事件必须携带结构化数据，
+/// 故用可选载荷承载，避免监听方再去反解文案。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum EventPayload {
     /// `SelectionChanged` 的完整前后状态。
     Selection(Box<SelectionChange>),
+    /// `EditingStarted`：编辑事务开始。
+    EditingStarted {
+        /// 被编辑对象。
+        object_id: ObjectId,
+        /// 开始编辑时的版本。
+        version: u64,
+    },
+    /// `EditingCommitted`：编辑已提交。
+    EditingCommitted {
+        /// 被编辑对象。
+        object_id: ObjectId,
+        /// 提交前版本。
+        before_version: u64,
+        /// 提交后版本。
+        after_version: u64,
+    },
+    /// `EditingCanceled`：编辑已取消。
+    EditingCanceled {
+        /// 被编辑对象。
+        object_id: ObjectId,
+        /// 取消原因。
+        reason: EditingCancelReason,
+    },
 }
 
 /// 事件对象：承载事件种类、中文描述与可选结构化载荷。
@@ -55,6 +80,44 @@ impl Event {
         );
         Self::new("SelectionChanged", message)
             .with_payload(EventPayload::Selection(Box::new(change)))
+    }
+
+    /// `EditingStarted`（`12` §十五）：编辑事务开始后发布。
+    pub fn editing_started(object_id: ObjectId, version: u64) -> Self {
+        Self::new(
+            "EditingStarted",
+            format!("开始编辑对象：{}（版本 {}）", object_id.0, version),
+        )
+        .with_payload(EventPayload::EditingStarted { object_id, version })
+    }
+
+    /// `EditingCommitted`（`12` §十五）：Commit 成功后发布。
+    pub fn editing_committed(object_id: ObjectId, before_version: u64, after_version: u64) -> Self {
+        Self::new(
+            "EditingCommitted",
+            format!(
+                "编辑已提交：对象 {}（版本 {} → {}）",
+                object_id.0, before_version, after_version
+            ),
+        )
+        .with_payload(EventPayload::EditingCommitted {
+            object_id,
+            before_version,
+            after_version,
+        })
+    }
+
+    /// `EditingCanceled`（`12` §十五 / §十九 C-7）：取消或选择变化导致会话结束时发布。
+    pub fn editing_canceled(object_id: ObjectId, reason: EditingCancelReason) -> Self {
+        let reason_text = match reason {
+            EditingCancelReason::UserCancel => "用户取消",
+            EditingCancelReason::SelectionChanged => "选择已变化",
+        };
+        Self::new(
+            "EditingCanceled",
+            format!("编辑已取消：对象 {}（{}）", object_id.0, reason_text),
+        )
+        .with_payload(EventPayload::EditingCanceled { object_id, reason })
     }
 
     /// `TaskFinished`：Task 成功结束（`01` §6 冻结的 6 类事件之一）。
