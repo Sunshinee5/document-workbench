@@ -100,7 +100,7 @@ crates/dw-ocr       OCR Driver 骨架
 crates/dw-office    Office Driver 骨架
 apps/dw-desktop     Tauri 2 桌面壳、IPC、组装层 CoreState
 ui                  React + TS + Vite 前端
-docs/spec           17 份规范，唯一事实源
+docs/spec           18 份规范，唯一事实源
 docs/features       Feature 文档（15 起含 Implementation Order 与 Failure Policy）
 docs/records        实现与评审记录，仅溯源
 docs/guides         排期与环境指南，无规范权

@@ -480,14 +480,53 @@
   background: var(--dw-selection);
 }
 
-/* Editing 层：caret 占位，编辑事务由 18-06 EditingSession 驱动后接管。 */
-.dw-layer-editing.is-active::after {
-  content: '';
+/* Selection 层：Hover 虚线、Selection 实线 + 8 个像素的手柄（只画不响应）。 */
+.dw-object-box.is-hover {
+  border: 1px dashed var(--dw-accent);
+  background: transparent;
+}
+
+.dw-object-box.is-selected {
+  border: 1.5px solid var(--dw-accent);
+  background: var(--dw-selection);
+}
+
+.dw-handle {
   position: absolute;
-  left: 12px;
-  top: 12px;
-  width: 1px;
-  height: 14px;
+  width: 6px;
+  height: 6px;
+  border: 1px solid var(--dw-accent);
+  background: var(--dw-paper);
+  border-radius: 1px;
+}
+
+.dw-handle-nw {
+  left: -4px;
+  top: -4px;
+}
+
+.dw-handle-ne {
+  right: -4px;
+  top: -4px;
+}
+
+.dw-handle-sw {
+  left: -4px;
+  bottom: -4px;
+}
+
+.dw-handle-se {
+  right: -4px;
+  bottom: -4px;
+}
+
+/* 编辑态 Caret：位置取对象框左侧，编辑事务由 EditingSession 驱动。 */
+.dw-caret {
+  position: absolute;
+  left: -1px;
+  top: 0;
+  width: 1.5px;
+  height: 100%;
   background: var(--dw-caret);
   animation: dw-caret-blink 1s steps(2, start) infinite;
 }
@@ -501,4 +540,34 @@
 /* Debug 层默认关闭：只作为调试网格的挂载点。 */
 .dw-layer-debug {
   display: none;
+}
+
+/* Inspector 文本编辑框（ReplaceText）：唯一可写的属性。 */
+.dw-prop-edit {
+  padding: 6px 10px 0;
+}
+
+.dw-prop-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+  font-size: 11px;
+  resize: vertical;
+}
+
+/* Inspector 文本编辑框（ReplaceText）：唯一可写的属性。 */
+.dw-prop-edit {
+  padding: 6px 10px 0;
+}
+
+.dw-prop-input {
+  width: 100%;
+  padding: 4px 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+  font-size: 11px;
+  resize: vertical;
 }

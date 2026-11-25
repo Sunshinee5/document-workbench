@@ -83,10 +83,41 @@ interface PdfViewerProps {
   onSelectPage: (page: number, mode: 'replace' | 'toggle' | 'range') => void;
   /** 逐页 Overlay 数据（键为原始页码）；为空时不画对象框。 */
   overlayPages?: Record<number, PageOverlayData>;
-  /** 当前聚焦对象 id：只影响高亮，不写 Selection 真值。 */
-  focusedObjectId?: number | null;
-  /** 鼠标模式：决定编辑层是否激活与画布光标。 */
+  /** Hover 对象 id（来自 hit_test 投影）。 */
+  hoverObjectId?: number | null;
+  /** 选中对象 id 列表（Selection 真值在 Session）。 */
+  selectedObjectIds?: number[];
+  /** 正在编辑的对象 id：显示 Caret。 */
+  editingObjectId?: number | null;
+  /** 鼠标模式：决定画布光标。 */
   mode?: string;
+  /** 指针在页面内移动：交给 Controller 做命中测试。 */
+  onPagePointerMove?: (
+    page: number,
+    x: number,
+    y: number,
+    pageWidthPx: number,
+    rotation: number,
+  ) => void;
+  /** 指针离开页面：清 Hover。 */
+  onPagePointerLeave?: () => void;
+  /** 单击页面：交给 Controller 命中后写 Selection。 */
+  onPageClick?: (
+    page: number,
+    x: number,
+    y: number,
+    pageWidthPx: number,
+    rotation: number,
+    mods: { ctrl: boolean; shift: boolean },
+  ) => void;
+  /** 双击页面：交给 Controller 进入编辑。 */
+  onPageDoubleClick?: (
+    page: number,
+    x: number,
+    y: number,
+    pageWidthPx: number,
+    rotation: number,
+  ) => void;
 }
 
 /** 单页 canvas：进入视口才渲染，离开后保留画布避免反复重绘。 */
@@ -195,8 +226,14 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     saveRevision,
     onSelectPage,
     overlayPages,
-    focusedObjectId = null,
+    hoverObjectId = null,
+    selectedObjectIds = [],
+    editingObjectId = null,
     mode = 'browse',
+    onPagePointerMove,
+    onPagePointerLeave,
+    onPageClick,
+    onPageDoubleClick,
   },
   ref,
 ) {
@@ -421,9 +458,44 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               pageRefs.current[index] = element;
             }}
             className={selectedPages.includes(index + 1) ? 'pdf-page-slot selected' : 'pdf-page-slot'}
+            onMouseMove={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              onPagePointerMove?.(
+                box.original,
+                event.clientX - rect.left,
+                event.clientY - rect.top,
+                rect.width,
+                box.rotation,
+              );
+            }}
+            onMouseLeave={() => onPagePointerLeave?.()}
             onClick={(event) => {
-              const mode = event.shiftKey ? 'range' : event.ctrlKey || event.metaKey ? 'toggle' : 'replace';
-              onSelectPage(index + 1, mode);
+              // 页选择（Feature-02）与对象选择（17 章）并行：页级仍写 Session.selection.pages。
+              const selectMode = event.shiftKey
+                ? 'range'
+                : event.ctrlKey || event.metaKey
+                  ? 'toggle'
+                  : 'replace';
+              onSelectPage(index + 1, selectMode);
+              const rect = event.currentTarget.getBoundingClientRect();
+              onPageClick?.(
+                box.original,
+                event.clientX - rect.left,
+                event.clientY - rect.top,
+                rect.width,
+                box.rotation,
+                { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey },
+              );
+            }}
+            onDoubleClick={(event) => {
+              const rect = event.currentTarget.getBoundingClientRect();
+              onPageDoubleClick?.(
+                box.original,
+                event.clientX - rect.left,
+                event.clientY - rect.top,
+                rect.width,
+                box.rotation,
+              );
             }}
           >
             <PageCanvas
@@ -438,8 +510,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               pageHeight={overlayPages?.[box.original]?.pageHeight ?? baseSize.height}
               rotation={box.rotation}
               objects={overlayPages?.[box.original]?.objects ?? []}
-              focusedObjectId={focusedObjectId}
-              editing={mode === 'edit'}
+              hoverObjectId={hoverObjectId}
+              selectedObjectIds={selectedObjectIds}
+              editingObjectId={editingObjectId}
             />
           </div>
         ))}

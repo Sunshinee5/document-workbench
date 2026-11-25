@@ -515,6 +515,12 @@ impl ISave for PdfSaver {
             content_object_ids: Vec::new(),
         };
         *self.staged_lock() = Some(staged);
+
+        // 17 C-10：Document 待保存的 ContentPatch 在这里统一入暂存。
+        // Save 仍是唯一消费点（AD-25），ISave 签名不变，编辑侧不需要知道 Save 内部。
+        for patch in document.content_patches() {
+            self.stage_content_patch(&patch)?;
+        }
         dw_log::info(
             "persist",
             &format!(
@@ -546,14 +552,14 @@ impl ISave for PdfSaver {
         let can_incremental = incremental && same_target && self.supports_incremental(document);
         // Persist Pipeline：写盘只能消费 apply_changes() 的产出，不直接读 Document 写字节。
         let staged = self.staged_or_apply(document)?;
-        if can_incremental {
+        let outcome = if can_incremental {
             match self.write_incremental(&staged, target) {
-                Ok(outcome) => Ok(outcome),
+                Ok(outcome) => outcome,
                 Err(error) => {
                     // Failure Policy：增量写失败先记 WARN 回退全量，仍失败才向上抛。
                     let reason = format!("增量写失败，回退全量：{}", error.message);
                     dw_log::warn("incremental", &reason);
-                    self.write_full(staged, target, &reason)
+                    self.write_full(staged, target, &reason)?
                 }
             }
         } else {
@@ -564,8 +570,11 @@ impl ISave for PdfSaver {
             } else {
                 "源文件不可增量（不存在 / 已加密 / 已被外部改写 / 结构异常）"
             };
-            self.write_full(staged, target, reason)
-        }
+            self.write_full(staged, target, reason)?
+        };
+        // 写盘成功才清空待保存补丁；失败保留，允许用户重试。
+        document.clear_content_patches();
+        Ok(outcome)
     }
 
     /// 另存为：目标路径是另一个文件时必须全量重写；目标等于源文件时复用覆盖保存。
@@ -588,6 +597,8 @@ impl ISave for PdfSaver {
         );
         let staged = self.staged_or_apply(document)?;
         let outcome = self.write_full(staged, target, "另存为新路径")?;
+        // 另存为同样消费了补丁，成功后清空队列。
+        document.clear_content_patches();
         dw_log::info(
             "saveas",
             &format!(

@@ -121,7 +121,16 @@ impl ContentStreamParser {
                     text_matrix.f += dy;
                 }
                 "Tj" | "TJ" => {
-                    let (glyphs, raw) = collect_text(&operation.operands);
+                    // 编码宽度由字体决定：Identity / Type0 是双字节码，简单字体是单字节码。
+                    // 与 18-08 内容重写（固定写 2 字节大端）保持一致，否则往返会错位。
+                    let two_byte = font_id
+                        .as_deref()
+                        .and_then(|name| ResourceParser::new().font(pdf, context, name))
+                        .map(|font| {
+                            font.encoding.contains("Identity") || font.subtype.contains("Type0")
+                        })
+                        .unwrap_or(false);
+                    let (glyphs, raw) = collect_text(&operation.operands, two_byte);
                     let unicode =
                         decode_unicode(pdf, context, font_id.as_deref(), &glyphs, raw.as_deref());
                     let bbox = text_bbox(text_matrix, font_size, glyphs.len());
@@ -140,7 +149,7 @@ impl ContentStreamParser {
                     nodes.push(node);
                     *z_index += 1;
                     // 同一行后续的 Tj 需要沿文本行前进，避免全部对象重叠。
-                    let advance = glyphs_len(&operation.operands) as f64 * font_size * 0.6;
+                    let advance = glyphs_len(&operation.operands, two_byte) as f64 * font_size * 0.6;
                     text_matrix.e += advance * text_matrix.a.abs();
                 }
                 "Do" => {
@@ -354,20 +363,30 @@ fn operand_number_of(object: &LopdfObject) -> Option<f64> {
 }
 
 /// 收集 Tj / TJ 的字符串字节；TJ 数组中的数字只影响宽度，不进入字形。
-fn collect_text(operands: &[LopdfObject]) -> (Vec<u32>, Option<String>) {
+fn collect_text(operands: &[LopdfObject], two_byte: bool) -> (Vec<u32>, Option<String>) {
     let mut glyphs = Vec::new();
     let mut fragments: Vec<String> = Vec::new();
+    let mut push = |bytes: &[u8], glyphs: &mut Vec<u32>, fragments: &mut Vec<String>| {
+        if two_byte {
+            for pair in bytes.chunks_exact(2) {
+                glyphs.push(u32::from(u16::from_be_bytes([pair[0], pair[1]])));
+            }
+            // 双字节编码没有可读的字面文本，交给 ToUnicode 还原。
+            if bytes.len() % 2 == 0 {
+                return;
+            }
+        } else {
+            glyphs.extend(bytes.iter().map(|byte| u32::from(*byte)));
+        }
+        fragments.push(String::from_utf8_lossy(bytes).to_string());
+    };
     for operand in operands {
         match operand {
-            LopdfObject::String(bytes, _) => {
-                glyphs.extend(bytes.iter().map(|byte| u32::from(*byte)));
-                fragments.push(String::from_utf8_lossy(bytes).to_string());
-            }
+            LopdfObject::String(bytes, _) => push(bytes, &mut glyphs, &mut fragments),
             LopdfObject::Array(items) => {
                 for item in items {
                     if let LopdfObject::String(bytes, _) = item {
-                        glyphs.extend(bytes.iter().map(|byte| u32::from(*byte)));
-                        fragments.push(String::from_utf8_lossy(bytes).to_string());
+                        push(bytes, &mut glyphs, &mut fragments);
                     }
                 }
             }
@@ -383,15 +402,16 @@ fn collect_text(operands: &[LopdfObject]) -> (Vec<u32>, Option<String>) {
 }
 
 /// 估算 TJ 数组中文本字形数，供文本位置推进。
-fn glyphs_len(operands: &[LopdfObject]) -> usize {
+fn glyphs_len(operands: &[LopdfObject], two_byte: bool) -> usize {
+    let width = |len: usize| if two_byte { len.div_ceil(2) } else { len };
     operands
         .iter()
         .map(|operand| match operand {
-            LopdfObject::String(bytes, _) => bytes.len(),
+            LopdfObject::String(bytes, _) => width(bytes.len()),
             LopdfObject::Array(items) => items
                 .iter()
                 .filter_map(|item| match item {
-                    LopdfObject::String(bytes, _) => Some(bytes.len()),
+                    LopdfObject::String(bytes, _) => Some(width(bytes.len())),
                     _ => None,
                 })
                 .sum(),

@@ -21,10 +21,12 @@ export interface PageOverlaysProps {
   rotation: number;
   /** 本页对象。 */
   objects: OverlayObject[];
-  /** 当前聚焦对象（UI 聚焦，非 Selection 真值）。 */
-  focusedObjectId: number | null;
-  /** 是否处于编辑模式：仅控制 caret 层是否显示。 */
-  editing: boolean;
+  /** Hover 对象（来自 hit_test，UI 不推算）。 */
+  hoverObjectId: number | null;
+  /** 选中对象（Selection 真值在 Session，这里只是投影）。 */
+  selectedObjectIds: number[];
+  /** 正在编辑的对象：显示 Caret。 */
+  editingObjectId: number | null;
 }
 
 /** 屏幕百分比矩形。 */
@@ -98,34 +100,57 @@ export function PageOverlays({
   pageHeight,
   rotation,
   objects,
-  focusedObjectId,
-  editing,
+  hoverObjectId,
+  selectedObjectIds,
+  editingObjectId,
 }: PageOverlaysProps) {
   return (
     <div className="dw-overlays" aria-hidden="true">
       {/* Text 层：PDF.js 文本层的占位，只读，不参与交互。 */}
       <div className="dw-layer dw-layer-text" />
-      {/* Selection 层：对象聚焦框（点击选择真值仍在 Session.selection）。 */}
+      {/* Selection 层：Hover 虚线框 + Selection 实线框 + 编辑 Caret，全部只读。 */}
       <div className="dw-layer dw-layer-selection">
         {objects.map((object) => {
           const box = projectBox(object.bbox, pageWidth, pageHeight, rotation);
-          const focused = object.objectId === focusedObjectId;
+          const selected = selectedObjectIds.includes(object.objectId);
+          const hovered = hoverObjectId === object.objectId;
+          const editing = editingObjectId === object.objectId;
+          if (!selected && !hovered && !editing) {
+            return null;
+          }
+          const classes = ['dw-object-box'];
+          if (selected) {
+            classes.push('is-selected');
+          }
+          if (hovered) {
+            classes.push('is-hover');
+          }
           return (
             <div
               key={object.objectId}
-              className={focused ? 'dw-object-box is-focused' : 'dw-object-box'}
+              className={classes.join(' ')}
               style={{
                 left: `${box.left}%`,
                 top: `${box.top}%`,
                 width: `${box.width}%`,
                 height: `${box.height}%`,
               }}
-            />
+            >
+              {editing ? <span className="dw-caret" /> : null}
+              {selected ? (
+                <>
+                  <span className="dw-handle dw-handle-nw" />
+                  <span className="dw-handle dw-handle-ne" />
+                  <span className="dw-handle dw-handle-sw" />
+                  <span className="dw-handle dw-handle-se" />
+                </>
+              ) : null}
+            </div>
           );
         })}
       </div>
-      {/* Editing 层：caret 仅在编辑模式显示，编辑事务由 18-06 EditingSession 驱动。 */}
-      <div className={editing ? 'dw-layer dw-layer-editing is-active' : 'dw-layer dw-layer-editing'} />
+      {/* Editing 层：整页编辑态提示，Caret 由 Selection 层按对象绘制。 */}
+      <div className={editingObjectId !== null ? 'dw-layer dw-layer-editing is-active' : 'dw-layer dw-layer-editing'} />
       {/* 以下层按 19 / 20 / 21 章接入，顺序不可调整。 */}
       <div className="dw-layer dw-layer-annotation" />
       <div className="dw-layer dw-layer-ocr" />

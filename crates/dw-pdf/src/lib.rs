@@ -7,6 +7,7 @@
 //! Stage 3 才做结构编辑（旋转 / 删页 / 合并 / 拆分）。
 
 pub mod content_rewrite;
+pub mod editing_service;
 pub mod content_stream;
 pub mod edit;
 pub mod intermediate;

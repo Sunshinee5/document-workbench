@@ -77,6 +77,8 @@ export interface RibbonProps {
   onActualSize: () => void;
   /** 全屏。 */
   onFullscreen: () => void;
+  /** 能力投影：编辑类按钮只按它启停，禁止写死（§六）。 */
+  capability: { can_edit: boolean; can_edit_text: boolean; can_edit_image: boolean; can_edit_path: boolean };
 }
 
 /** 一组 Ribbon 按钮：分组标题固定在底部，与 Office 习惯一致。 */
@@ -116,6 +118,7 @@ export function Ribbon(props: RibbonProps) {
     onThemeChange,
   } = props;
 
+  const capability = props.capability;
   const modeButton = (target: MouseMode, icon: IconName, label: string, enabled = true) => (
     <Button
       key={target}
@@ -212,11 +215,41 @@ export function Ribbon(props: RibbonProps) {
             <RibbonGroup label="鼠标模式">
               {modeButton('browse', 'browse', '浏览')}
               {modeButton('select', 'select', '选择')}
-              {modeButton('edit', 'editText', '编辑文本', false)}
+              <Button
+                stacked
+                icon="editText"
+                active={mode === 'edit'}
+                disabled={!capability.can_edit_text}
+                title={
+                  capability.can_edit_text
+                    ? '进入文字编辑模式（F2）'
+                    : '先选中一个文本对象'
+                }
+                onClick={() => onModeChange('edit')}
+              >
+                编辑文本
+              </Button>
             </RibbonGroup>
             <RibbonGroup label="对象">
-              {disabledButton('image', '替换图片', NOT_YET.replaceImage)}
+              <Button
+                stacked
+                icon="image"
+                disabled={!capability.can_edit_image}
+                title={capability.can_edit_image ? '图片工具' : '先选中一个图片对象'}
+                onClick={() => undefined}
+              >
+                替换图片
+              </Button>
               {disabledButton('crop', '裁剪', NOT_YET.crop)}
+              <Button
+                stacked
+                icon="path"
+                disabled={!capability.can_edit_path}
+                title={capability.can_edit_path ? 'Path 工具' : '先选中一个路径对象'}
+                onClick={() => undefined}
+              >
+                路径
+              </Button>
             </RibbonGroup>
             <RibbonGroup label="页面">
               <Button

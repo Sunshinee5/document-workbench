@@ -30,6 +30,8 @@ pub enum CommandKind {
     DeletePage,
     /// 移动页面（Feature-02）。
     MovePage,
+    /// 对象级编辑提交（`17` 章新增；与页面编辑共用同一条 History）。
+    EditObject,
     /// 合并文档。
     Merge,
     /// 保存文档。

@@ -50,7 +50,19 @@ pub fn run() {
             ipc::save_document,
             ipc::save_as_document,
             ipc::can_save,
-            ipc::is_dirty
+            ipc::is_dirty,
+            // 17 章：Desktop Integration（UI Bridge）
+            ipc::editor_open,
+            ipc::editor_close,
+            ipc::editor_state,
+            ipc::editor_hit_test,
+            ipc::editor_select,
+            ipc::editor_clear_selection,
+            ipc::editor_select_all,
+            ipc::editor_begin_edit,
+            ipc::editor_commit,
+            ipc::editor_cancel,
+            ipc::editor_inspector
         ])
         .run(tauri::generate_context!())
         .expect("文档工作台启动失败");

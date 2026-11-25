@@ -334,3 +334,198 @@ export async function pickSavePath(defaultPath?: string): Promise<string | null>
   });
   return result;
 }
+
+// ---------------------------------------------------------------------------
+// 17 章：Desktop Integration（UI Bridge）。UI 只消费这些命令，不解析 PDF。
+// ---------------------------------------------------------------------------
+
+/** 命中结果：Hover / Selection 的几何来源。 */
+export interface HitInfo {
+  page: number;
+  object_id: number;
+  kind: string;
+  kind_label: string;
+  bbox: [number, number, number, number];
+}
+
+/** 选择投影（真值在 Session.selection_state）。 */
+export interface SelectionInfo {
+  page: number | null;
+  primary: number | null;
+  selected: number[];
+  version: number;
+}
+
+/** 编辑事务投影（真值在 EditingEngine）。 */
+export interface EditingInfo {
+  active: boolean;
+  object_id: number | null;
+}
+
+/** 能力投影：Ribbon 只按它决定按钮亮/灰。 */
+export interface CapabilityInfo {
+  can_edit: boolean;
+  can_edit_text: boolean;
+  can_edit_image: boolean;
+  can_edit_path: boolean;
+}
+
+/** EditorState 快照：字段全部由 Core 填充。 */
+export interface EditorSnapshot {
+  document_id: number;
+  page: number;
+  zoom: number;
+  selection: SelectionInfo;
+  editing: EditingInfo;
+  capability: CapabilityInfo;
+  can_undo: boolean;
+  can_redo: boolean;
+  dirty: boolean;
+  pending_patches: number;
+  revision: number;
+}
+
+/** 提交结果。 */
+export interface CommitInfo {
+  object_id: number;
+  page: number;
+  before_version: number;
+  after_version: number;
+  operators: number;
+  snapshot: EditorSnapshot;
+}
+
+/** 文本分区。 */
+export interface TextInspector {
+  unicode: string | null;
+  font_id: string;
+  font_size: number;
+  glyph_count: number;
+  color: string | null;
+}
+
+/** 图片分区。 */
+export interface ImageInspector {
+  pixel_width: number;
+  pixel_height: number;
+  colorspace: string;
+  xref: number;
+  resolution_dpi: number | null;
+  compression: string | null;
+}
+
+/** 路径分区。 */
+export interface PathInspector {
+  command_count: number;
+  stroke: string | null;
+  fill: string | null;
+  line_width: number | null;
+}
+
+/** Inspector 数据。 */
+export interface InspectorInfo {
+  object_id: number;
+  page: number;
+  kind: string;
+  kind_label: string;
+  bbox: [number, number, number, number];
+  z_index: number;
+  lifecycle: string;
+  version: number;
+  text: TextInspector | null;
+  image: ImageInspector | null;
+  path: PathInspector | null;
+}
+
+/** 绑定文档：解析对象树并清空选择 / 事务。 */
+export async function editorOpen(documentId: number): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_open', { documentId });
+}
+
+/** 解绑：恢复默认状态（DT-11）。 */
+export async function editorClose(documentId: number): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_close', { documentId });
+}
+
+/** 拉取快照（不解析）。 */
+export async function editorState(documentId: number): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_state', { documentId });
+}
+
+/** 命中测试：x/y 为页面左上角起算的 CSS 像素。 */
+export async function editorHitTest(
+  documentId: number,
+  page: number,
+  x: number,
+  y: number,
+  pageWidthPx: number,
+  rotation: number,
+): Promise<HitInfo | null> {
+  return invoke<HitInfo | null>('editor_hit_test', {
+    documentId,
+    page,
+    x,
+    y,
+    pageWidthPx,
+    rotation,
+  });
+}
+
+/** 写选择。 */
+export async function editorSelect(
+  documentId: number,
+  page: number,
+  objectId: number,
+  multi: boolean,
+  ctrl: boolean,
+  shift: boolean,
+): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_select', {
+    documentId,
+    page,
+    objectId,
+    multi,
+    ctrl,
+    shift,
+  });
+}
+
+/** 清空选择。 */
+export async function editorClearSelection(
+  documentId: number,
+  page: number,
+): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_clear_selection', { documentId, page });
+}
+
+/** 全选当前页对象。 */
+export async function editorSelectAll(
+  documentId: number,
+  page: number,
+): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_select_all', { documentId, page });
+}
+
+/** 开始编辑。 */
+export async function editorBeginEdit(
+  documentId: number,
+  objectId: number,
+  text: string,
+): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_begin_edit', { documentId, objectId, text });
+}
+
+/** 提交编辑；`text` 为编辑框里的最终文本。 */
+export async function editorCommit(documentId: number, text?: string): Promise<CommitInfo> {
+  return invoke<CommitInfo>('editor_commit', { documentId, text: text ?? null });
+}
+
+/** 取消编辑。 */
+export async function editorCancel(documentId: number): Promise<EditorSnapshot> {
+  return invoke<EditorSnapshot>('editor_cancel', { documentId });
+}
+
+/** Inspector 数据。 */
+export async function editorInspector(objectId: number): Promise<InspectorInfo | null> {
+  return invoke<InspectorInfo | null>('editor_inspector', { objectId });
+}

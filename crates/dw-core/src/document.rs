@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Mutex, RwLock};
 
 use serde::{Deserialize, Serialize};
 
@@ -261,6 +261,11 @@ pub struct Document {
     pub declared_capabilities: CapabilitySet,
     /// 字体唯一真值（`13` AD-17）。Engine 只读消费，注册由调用方 / Parser 完成。
     pub font_registry: crate::font::FontRegistry,
+    /// 待保存的内容补丁队列（`17` C-10）：Commit 产生，Save 唯一消费。
+    ///
+    /// 它**不是**文档内容，因此不进 `DocumentInner`、不进 `DocumentSnapshot`：
+    /// 保存成功后清空；保存失败则保留，允许用户重试。
+    pending_patches: Mutex<Vec<crate::content::ContentPatch>>,
     /// 可变内容：内容修订号 / 状态 / 元数据。
     inner: RwLock<DocumentInner>,
 }
@@ -273,6 +278,7 @@ impl Document {
             kind,
             declared_capabilities,
             font_registry: crate::font::FontRegistry::new(),
+            pending_patches: Mutex::new(Vec::new()),
             inner: RwLock::new(DocumentInner {
                 revision: 0,
                 state: DocumentState::Created,
@@ -318,6 +324,43 @@ impl Document {
     /// 写入保存状态：唯一写入口是 `mutate()`，与生命周期状态互不干扰。
     pub fn set_save_state(&self, state: DocumentSaveState) {
         self.mutate(|inner| inner.save_state = state);
+    }
+
+    /// 写入一条待保存的内容补丁（`17` C-10）。
+    ///
+    /// **同页覆盖**：`ContentPatch` 是整页内容流的完整重写结果，同一页只保留最新一条，
+    /// 否则多条补丁会互相覆盖（后写的整页字节会盖掉前一条的编辑）。
+    pub fn push_content_patch(&self, patch: crate::content::ContentPatch) {
+        let mut guard = self
+            .pending_patches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        guard.retain(|item| item.page_id != patch.page_id);
+        guard.push(patch);
+    }
+
+    /// 待保存补丁的只读副本：`PdfSaver::apply_changes()` 消费，不转移所有权。
+    pub fn content_patches(&self) -> Vec<crate::content::ContentPatch> {
+        self.pending_patches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    /// 待保存补丁数量：状态栏 / 诊断用。
+    pub fn pending_content_patch_count(&self) -> usize {
+        self.pending_patches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .len()
+    }
+
+    /// 清空待保存补丁：只有写盘成功后调用（失败必须保留，允许重试）。
+    pub fn clear_content_patches(&self) {
+        self.pending_patches
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clear();
     }
 
     /// 内容修订号：页结构写回时递增，供 Diff 命名与事务快照比较使用。

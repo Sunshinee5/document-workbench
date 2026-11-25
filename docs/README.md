@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          17 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          18 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -26,7 +26,7 @@ docs/
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 十七份规范
+## 十八份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|

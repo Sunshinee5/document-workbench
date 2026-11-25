@@ -34,6 +34,8 @@ pub struct CoreState {
     pub driver_manager: Mutex<DriverManager>,
     /// 唯一 EventBus。
     pub event_bus: Mutex<EventBus>,
+    /// 对象编辑桥（`17` 章）：驱动侧编排缓存，不是第 4 个 Store。
+    pub editor: Mutex<dw_pdf::editing_service::ObjectEditingService>,
 }
 
 impl CoreState {
@@ -70,6 +72,7 @@ impl CoreState {
             task_manager: Mutex::new(TaskManager::new()),
             driver_manager: Mutex::new(drivers),
             event_bus: Mutex::new(events),
+            editor: Mutex::new(dw_pdf::editing_service::ObjectEditingService::new()),
         }
     }
 }
@@ -973,6 +976,13 @@ pub fn undo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String
         .cloned()
         .ok_or_else(|| "没有可撤销的命令".to_string())?;
 
+    if record.command_type == CommandKind::EditObject {
+        let info = replay_object_record(&state, session, id, &record, false)?;
+        lock(&state.event_bus).publish(Event::undo_executed(record.command_id));
+        dw_log::info("undo", &format!("已撤销对象编辑 {}", record.command_id));
+        return Ok(info);
+    }
+
     {
         let document = session
             .documents
@@ -1009,6 +1019,13 @@ pub fn redo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String
         .cloned()
         .ok_or_else(|| "没有可重做的命令".to_string())?;
 
+    if record.command_type == CommandKind::EditObject {
+        let info = replay_object_record(&state, session, id, &record, true)?;
+        lock(&state.event_bus).publish(Event::redo_executed(record.command_id));
+        dw_log::info("redo", &format!("已重做对象编辑 {}", record.command_id));
+        return Ok(info);
+    }
+
     {
         let document = session
             .documents
@@ -1026,6 +1043,50 @@ pub fn redo(state: tauri::State<'_, CoreState>) -> Result<PageLayoutInfo, String
     let mut events = lock(&state.event_bus);
     events.publish(Event::redo_executed(record.command_id));
     dw_log::info("redo", &format!("已重做命令 {}", record.command_id));
+    Ok(info)
+}
+
+/// 对象级撤销 / 重做：`EditObject` 记录委托编辑服务回放。
+///
+/// 页面 Diff 回放到 Document.page_layout，对象 Diff 只能回放到解析快照里的 Page，
+/// 因此按 `command_type` 分派，而不是让两套 Diff 混在一条回放函数里。
+fn replay_object_record(
+    state: &tauri::State<'_, CoreState>,
+    session: &mut Session,
+    id: DocumentId,
+    record: &CommandRecord,
+    forward: bool,
+) -> Result<PageLayoutInfo, String> {
+    let diffs: Vec<Diff> = record
+        .diff_reference
+        .iter()
+        .map(load_diff)
+        .collect::<Result<Vec<_>, _>>()?;
+    {
+        let document = session
+            .documents
+            .get(id)
+            .ok_or_else(|| "对象回放失败：文档不存在".to_string())?;
+        let mut editor = lock(&state.editor);
+        let mut events = lock(&state.event_bus);
+        for diff in &diffs {
+            editor
+                .replay_object(document, &mut events, diff, forward)
+                .map_err(|error| error.message)?;
+        }
+    }
+    if forward {
+        session.history.redo();
+    } else {
+        session.history.undo();
+    }
+    sync_state_to_save_point(session, id);
+    let document = session
+        .documents
+        .get(id)
+        .ok_or_else(|| "对象回放失败：文档不存在".to_string())?;
+    let mut info = page_layout_info(id, session, document);
+    info.diff_count = 0;
     Ok(info)
 }
 
@@ -1357,4 +1418,284 @@ pub fn can_save(state: tauri::State<'_, CoreState>) -> bool {
 #[tauri::command]
 pub fn is_dirty(state: tauri::State<'_, CoreState>) -> bool {
     can_save(state)
+}
+
+// ---------------------------------------------------------------------------
+// 17 章：Desktop Integration（UI Bridge）。IPC 只做组装与透传，编排在 dw-pdf。
+// ---------------------------------------------------------------------------
+
+use dw_core::command::CommandKind;
+use dw_pdf::editing_service::{CommitInfo, EditorSnapshot, HitInfo, InspectorInfo};
+
+/// 组装快照：页 / 缩放取 Workspace 真值，其余取 Core 投影。
+fn editor_snapshot_of(
+    editor: &dw_pdf::editing_service::ObjectEditingService,
+    session: &Session,
+    document: &Document,
+) -> EditorSnapshot {
+    let view = session.workspace.view_state();
+    editor.snapshot(session, document, view.current_page, view.zoom)
+}
+
+/// 绑定文档：解析对象树、清空选择、重置编辑事务。
+#[tauri::command]
+pub fn editor_open(
+    document_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "编辑会话绑定失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .open(session, DocumentId(document_id), &mut events)
+        .map_err(|error| error.message)?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "编辑会话绑定失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 解绑：清空选择与事务，恢复默认（DT-11）。
+#[tauri::command]
+pub fn editor_close(
+    document_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "编辑会话解绑失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor.close(session, &mut events);
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "编辑会话解绑失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 拉取当前快照（不解析）。
+#[tauri::command]
+pub fn editor_state(
+    document_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let manager = lock(&state.session_manager);
+    let session = manager
+        .active()
+        .ok_or_else(|| "读取编辑状态失败：没有活动会话".to_string())?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "读取编辑状态失败：文档不存在".to_string())?;
+    let editor = lock(&state.editor);
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 命中测试：屏幕坐标（页面左上角起算的 CSS 像素）→ 对象。
+#[tauri::command]
+pub fn editor_hit_test(
+    document_id: u64,
+    page: u32,
+    x: f64,
+    y: f64,
+    page_width_px: f64,
+    rotation: i32,
+    state: tauri::State<'_, CoreState>,
+) -> Result<Option<HitInfo>, String> {
+    let _ = document_id;
+    let editor = lock(&state.editor);
+    Ok(editor.hit_test(page, x, y, page_width_px, rotation))
+}
+
+/// 写选择（唯一真值在 Session.selection_state）。
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub fn editor_select(
+    document_id: u64,
+    page: u32,
+    object_id: u64,
+    multi: bool,
+    ctrl: bool,
+    shift: bool,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "选择失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .select(session, &mut events, page, object_id, multi, ctrl, shift)
+        .map_err(|error| error.message)?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "选择失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 清空选择。
+#[tauri::command]
+pub fn editor_clear_selection(
+    document_id: u64,
+    page: u32,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "清空选择失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .clear_selection(session, &mut events, page)
+        .map_err(|error| error.message)?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "清空选择失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 全选当前页对象（Ctrl+A）。
+#[tauri::command]
+pub fn editor_select_all(
+    document_id: u64,
+    page: u32,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "全选失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .select_all(session, &mut events, page)
+        .map_err(|error| error.message)?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "全选失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 开始编辑：建 WorkingCopy（EditingSession 真值在 EditingEngine）。
+#[tauri::command]
+pub fn editor_begin_edit(
+    document_id: u64,
+    object_id: u64,
+    text: String,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let manager = lock(&state.session_manager);
+    let session = manager
+        .active()
+        .ok_or_else(|| "开始编辑失败：没有活动会话".to_string())?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "开始编辑失败：文档不存在".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .begin_edit(session, document, &mut events, object_id, text)
+        .map_err(|error| error.message)?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// 提交：写回对象 → 字体重写 → 内容重写 → 入待保存队列 → 记 History。
+#[tauri::command]
+pub fn editor_commit(
+    document_id: u64,
+    text: Option<String>,
+    state: tauri::State<'_, CoreState>,
+) -> Result<CommitInfo, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "提交失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    let (commit, operators) = {
+        let document = session
+            .documents
+            .get(DocumentId(document_id))
+            .ok_or_else(|| "提交失败：文档不存在".to_string())?;
+        let commit = editor
+            .commit(session, document, &mut events, text.clone())
+            .map_err(|error| error.message)?;
+        let operators = document
+            .content_patches()
+            .into_iter()
+            .find(|patch| patch.page_id == commit.object.page_id)
+            .map(|patch| patch.operators.len())
+            .unwrap_or(0);
+        (commit, operators)
+    };
+
+    // History：对象 Diff 与页面 Diff 共用同一条 History，回放按 command_type 分派。
+    let command_id = session.history.next_command_id();
+    let refs = persist_diffs(vec![commit.diff.clone()], command_id);
+    session.history.record(CommandRecord {
+        command_id,
+        command_type: CommandKind::EditObject,
+        params: serde_json::json!({
+            "document_id": document_id,
+            "page": commit.object.page_id.raw(),
+            "object_id": commit.object.object_id.0,
+        }),
+        diff_reference: refs,
+        timestamp: now_millis(),
+        version: 1,
+    });
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "提交失败：文档不存在".to_string())?;
+    Ok(CommitInfo {
+        object_id: commit.object.object_id.0,
+        page: commit.object.page_id.raw(),
+        before_version: commit.before_version,
+        after_version: commit.after_version,
+        operators,
+        snapshot: editor_snapshot_of(&editor, session, document),
+    })
+}
+
+/// 取消编辑：丢弃 WorkingCopy，对象与版本保持原样。
+#[tauri::command]
+pub fn editor_cancel(
+    document_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<EditorSnapshot, String> {
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "取消编辑失败：没有活动会话".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor.cancel(&mut events).map_err(|error| error.message)?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "取消编辑失败：文档不存在".to_string())?;
+    Ok(editor_snapshot_of(&editor, session, document))
+}
+
+/// Inspector 数据：只读投影。
+#[tauri::command]
+pub fn editor_inspector(
+    object_id: u64,
+    state: tauri::State<'_, CoreState>,
+) -> Result<Option<InspectorInfo>, String> {
+    let editor = lock(&state.editor);
+    Ok(editor.inspector(object_id))
 }

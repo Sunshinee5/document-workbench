@@ -28,7 +28,8 @@ import {
   WorkspaceNav,
   type WorkspaceKind,
 } from './components/workspace';
-import type { ObjectNodeInfo } from './ipc';
+import { EditorController, type EditorMode } from './editor/editorState';
+import type { InspectorInfo, ObjectNodeInfo } from './ipc';
 import { applyTheme, loadTheme, saveTheme, watchSystemTheme, type ThemeMode } from './theme';
 import { WorkbenchViewModel, formatSize } from './viewmodels';
 import './index.css';
@@ -52,10 +53,16 @@ export default function App() {
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
   /** 聚焦对象：只读导航高亮，不是 18-05 SelectionState 真值。 */
   const [focusedObject, setFocusedObject] = useState<ObjectNodeInfo | null>(null);
+  // 17 章：唯一 Controller（EditorState 是 Core 快照的投影，不是真值源）。
+  const editor = useMemo(() => new EditorController(), []);
+  const [editorState, setEditorState] = useState(() => editor.snapshot);
+  const [inspector, setInspector] = useState<InspectorInfo | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
+
+  useEffect(() => editor.subscribe(() => setEditorState(editor.snapshot)), [editor]);
 
   useEffect(() => {
     void viewModel.initialize();
@@ -78,10 +85,39 @@ export default function App() {
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // 切换文档时清空聚焦对象，避免 Inspector 显示上一个文档的对象。
+  // 切换文档：解绑旧会话、绑定新会话（DT-11），并清空 Inspector。
+  const lastDocumentRef = useRef<number | null>(null);
   useEffect(() => {
+    const previous = lastDocumentRef.current;
+    const current = state.activeDocumentId;
+    lastDocumentRef.current = current;
     setFocusedObject(null);
-  }, [state.activeDocumentId]);
+    setInspector(null);
+    if (previous !== null && previous !== current) {
+      void editor.close(previous);
+    }
+    if (current !== null) {
+      void editor.open(current);
+    }
+  }, [state.activeDocumentId, editor]);
+
+  // 主选对象变化 → 拉 Inspector（只读投影，不缓存 Object）。
+  useEffect(() => {
+    const primary = editorState.selection.primary;
+    if (primary === null) {
+      setInspector(null);
+      return;
+    }
+    let cancelled = false;
+    void editor.inspector(primary).then((info) => {
+      if (!cancelled) {
+        setInspector(info);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [editor, editorState.selection.primary, editorState.revision]);
 
   // 对象树就绪后默认展开第一页，让 Workspace 一打开就有内容。
   useEffect(() => {
@@ -130,6 +166,59 @@ export default function App() {
       viewerRef.current?.goToPage(page);
     },
     [viewModel],
+  );
+
+  // 指针在页面上移动：交给 Controller 命中（Hover 反馈）。
+  const handlePointerMove = useCallback(
+    (page: number, x: number, y: number, widthPx: number, rotation: number) => {
+      void editor.hitTest(page, x, y, widthPx, rotation);
+    },
+    [editor],
+  );
+
+  const handlePointerLeave = useCallback(() => editor.clearHover(), [editor]);
+
+  // 单击：先命中再写 Selection（命中失败则清空选择）。
+  const handlePageClick = useCallback(
+    (
+      page: number,
+      x: number,
+      y: number,
+      widthPx: number,
+      rotation: number,
+      mods: { ctrl: boolean; shift: boolean },
+    ) => {
+      void (async () => {
+        const hit = await editor.hitTest(page, x, y, widthPx, rotation);
+        if (hit) {
+          await editor.select(page, hit.object_id, {
+            multi: mods.ctrl || mods.shift,
+            ctrl: mods.ctrl,
+            shift: mods.shift,
+          });
+        } else {
+          await editor.clearSelection(page);
+        }
+      })();
+    },
+    [editor],
+  );
+
+  // 双击：命中文本对象后进入编辑（F2 等价）。
+  const handlePageDoubleClick = useCallback(
+    (page: number, x: number, y: number, widthPx: number, rotation: number) => {
+      void (async () => {
+        const hit = await editor.hitTest(page, x, y, widthPx, rotation);
+        if (!hit || hit.kind !== 'Text') {
+          return;
+        }
+        const info = await editor.inspector(hit.object_id);
+        await editor.select(page, hit.object_id);
+        await editor.beginEdit(hit.object_id, info?.text?.unicode ?? '');
+        editor.setMode('edit');
+      })();
+    },
+    [editor],
   );
 
   const toggleFullscreen = useCallback(() => {
@@ -189,6 +278,33 @@ export default function App() {
         viewModel.setZoom(1);
         return;
       }
+      if (event.key === 'Escape' && editorState.editing.active) {
+        event.preventDefault();
+        void editor.cancel();
+        return;
+      }
+      if (event.key === 'F2' && editorState.capability.can_edit_text) {
+        event.preventDefault();
+        const primary = editorState.selection.primary;
+        if (primary !== null) {
+          void (async () => {
+            const info = await editor.inspector(primary);
+            await editor.beginEdit(primary, info?.text?.unicode ?? '');
+            editor.setMode('edit');
+          })();
+        }
+        return;
+      }
+      if (event.key === 'Enter' && editorState.editing.active) {
+        event.preventDefault();
+        void editor.commit();
+        return;
+      }
+      if (modifier && key === 'a' && editorState.documentId !== null) {
+        event.preventDefault();
+        void editor.selectAll(editorState.page);
+        return;
+      }
       if (event.key === 'PageDown') {
         event.preventDefault();
         viewModel.nextPage();
@@ -201,7 +317,7 @@ export default function App() {
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [viewModel, toggleFullscreen]);
+  }, [viewModel, toggleFullscreen, editor, editorState]);
 
   // ---- 投影：对象树 → 逐页 Overlay 数据 ----
   const overlayPages = useMemo<Record<number, PageOverlayData>>(() => {
@@ -321,7 +437,10 @@ export default function App() {
         canUndo={state.canUndo}
         canRedo={state.canRedo}
         mode={mode}
-        onModeChange={setMode}
+        onModeChange={(next) => {
+          setMode(next);
+          editor.setMode(next as EditorMode);
+        }}
         theme={theme}
         onThemeChange={setTheme}
         onOpen={() => void viewModel.openFile()}
@@ -336,6 +455,7 @@ export default function App() {
         onFitWidth={() => viewerRef.current?.fitWidth()}
         onActualSize={() => viewModel.setZoom(1)}
         onFullscreen={toggleFullscreen}
+        capability={editorState.capability}
       />
 
       <div className="dw-main">
@@ -375,8 +495,14 @@ export default function App() {
               saveRevision={state.saveRevision}
               onSelectPage={(page, selectMode) => void viewModel.selectPages([page], selectMode)}
               overlayPages={overlayPages}
-              focusedObjectId={focusedObject?.object_id ?? null}
+              hoverObjectId={editorState.hover?.object_id ?? null}
+              selectedObjectIds={editorState.selection.selected}
+              editingObjectId={editorState.editing.objectId}
               mode={mode}
+              onPagePointerMove={handlePointerMove}
+              onPagePointerLeave={handlePointerLeave}
+              onPageClick={handlePageClick}
+              onPageDoubleClick={handlePageDoubleClick}
             />
             <ToastStack toasts={toasts} onDismiss={dismiss} />
           </div>
@@ -394,10 +520,20 @@ export default function App() {
             lastSavedAt: state.lastSavedAt,
             parserText,
           }}
-          focusedObject={focusedObject}
+          inspector={inspector}
           focusedPageRotation={
-            focusedObject ? (state.rotations[focusedObject.page] ?? 0) : null
+            inspector ? (state.rotations[inspector.page] ?? 0) : null
           }
+          editing={editorState.editing.active}
+          onBeginEdit={() => {
+            const primary = editorState.selection.primary;
+            if (primary !== null) {
+              void editor.beginEdit(primary, inspector?.text?.unicode ?? '');
+            }
+          }}
+          onCommit={() => void editor.commit()}
+          onCancel={() => void editor.cancel()}
+          onReplaceText={(text) => void editor.commit(text)}
           formatSize={(bytes) => (bytes > 0 ? formatSize(bytes) : '—')}
         />
       </div>
