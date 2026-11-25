@@ -292,6 +292,129 @@ pub enum Color {
     Named(String),
 }
 
+/// 字体资源引用（18-03 §十四 / §十六）：统一表达 `/F1` 之类的资源名。
+///
+/// 领域层禁止直接保存 lopdf Object；xref 只作为可选定位信息，不参与对象身份。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FontRef {
+    /// 资源名字典中的字体名（不含 `/`）；空串表示未指定。
+    pub name: String,
+    /// XObject / 字体对象的可选 xref 对象号。
+    pub xref: Option<u64>,
+}
+
+impl FontRef {
+    /// 由资源名构造引用。
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            xref: None,
+        }
+    }
+
+    /// 附加 xref 定位信息。
+    pub fn with_xref(mut self, xref: u64) -> Self {
+        self.xref = Some(xref);
+        self
+    }
+}
+
+/// 图片 XObject 资源引用（18-03 §十六）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ImageRef {
+    /// `Do` 操作符引用的资源名（不含 `/`）。
+    pub name: String,
+    /// XObject 的 lopdf xref 对象号。
+    pub xref: Option<u64>,
+}
+
+impl ImageRef {
+    /// 由资源名构造引用。
+    pub fn new(name: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            xref: None,
+        }
+    }
+
+    /// 附加 xref 定位信息。
+    pub fn with_xref(mut self, xref: u64) -> Self {
+        self.xref = Some(xref);
+        self
+    }
+
+    /// 只有 xref 而资源名未知时生成稳定占位名，保证反向映射仍可产出 `Do`。
+    pub fn from_xref(xref: u64) -> Self {
+        Self {
+            name: format!("Im{}", xref),
+            xref: Some(xref),
+        }
+    }
+}
+
+/// 色彩空间资源引用（18-03 §十六）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ColorSpaceRef {
+    /// 色彩空间资源名；标准名如 `DeviceRGB`，空串表示未指定。
+    pub name: String,
+}
+
+impl ColorSpaceRef {
+    /// 由名称构造引用。
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+/// 图案资源引用（18-03 §十六，预留给后续 Pattern 映射）。
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PatternRef {
+    /// 图案资源名，空串表示未使用。
+    pub name: String,
+}
+
+impl PatternRef {
+    /// 由名称构造引用。
+    pub fn new(name: impl Into<String>) -> Self {
+        Self { name: name.into() }
+    }
+}
+
+/// 统一颜色值（18-03 §十五）：Object 不保存 PDF Operator，只保存中性颜色。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ColorValue {
+    /// 灰度。
+    Gray(f64),
+    /// RGB。
+    Rgb(f64, f64, f64),
+    /// CMYK。
+    Cmyk(f64, f64, f64, f64),
+    /// 命名色（如 Separation 色版）。
+    Named(String),
+}
+
+impl ColorValue {
+    /// 由领域 `Color` 转出统一颜色值。
+    pub fn from_color(color: &Color) -> Self {
+        match color {
+            Color::Gray(value) => Self::Gray(*value),
+            Color::Rgb(red, green, blue) => Self::Rgb(*red, *green, *blue),
+            Color::Cmyk(cyan, magenta, yellow, key) => Self::Cmyk(*cyan, *magenta, *yellow, *key),
+            Color::Named(name) => Self::Named(name.clone()),
+        }
+    }
+
+    /// 转回领域 `Color`，供反向映射生成操作符。
+    pub fn to_color(&self) -> Color {
+        match self {
+            Self::Gray(value) => Color::Gray(*value),
+            Self::Rgb(red, green, blue) => Color::Rgb(*red, *green, *blue),
+            Self::Cmyk(cyan, magenta, yellow, key) => Color::Cmyk(*cyan, *magenta, *yellow, *key),
+            Self::Named(name) => Color::Named(name.clone()),
+        }
+    }
+}
+
 /// 文本专属数据（`07` §八）。
 ///
 /// 必须同时保存 `glyphs` 与 `unicode`：大量 PDF 没有 Unicode 映射，
@@ -306,13 +429,18 @@ pub struct TextObject {
     pub unicode: Option<String>,
     /// 文本矩阵。
     pub transform: Transform,
+    /// 统一字体资源引用（与 `font_id` 同源，Mapper 同时维护）。
+    #[serde(default)]
+    pub font: FontRef,
 }
 
 impl TextObject {
     /// 构造文本数据。
     pub fn new(font_id: impl Into<String>, glyphs: Vec<u32>, unicode: Option<String>) -> Self {
+        let name = font_id.into();
         Self {
-            font_id: font_id.into(),
+            font: FontRef::new(name.clone()),
+            font_id: name,
             glyphs,
             unicode,
             transform: Transform::IDENTITY,
@@ -331,16 +459,25 @@ pub struct ImageObject {
     pub height: u32,
     /// 色彩空间名（DeviceRGB / DeviceGray 等）。
     pub colorspace: String,
+    /// 统一图片资源引用（18-03 §十六）。
+    #[serde(default)]
+    pub resource: ImageRef,
+    /// 统一色彩空间引用（18-03 §十六）。
+    #[serde(default)]
+    pub color_space: ColorSpaceRef,
 }
 
 impl ImageObject {
     /// 构造图片数据。
     pub fn new(xref: u64, width: u32, height: u32, colorspace: impl Into<String>) -> Self {
+        let name = colorspace.into();
         Self {
             xref,
             width,
             height,
-            colorspace: colorspace.into(),
+            color_space: ColorSpaceRef::new(name.clone()),
+            colorspace: name,
+            resource: ImageRef::from_xref(xref),
         }
     }
 }
@@ -354,12 +491,28 @@ pub struct PathObject {
     pub stroke: Option<Color>,
     /// 填充色。
     pub fill: Option<Color>,
+    /// 统一描边颜色值（18-03 §十五）。
+    #[serde(default)]
+    pub stroke_value: Option<ColorValue>,
+    /// 统一填充颜色值（18-03 §十五）。
+    #[serde(default)]
+    pub fill_value: Option<ColorValue>,
+    /// 统一色彩空间引用（18-03 §十六）。
+    #[serde(default)]
+    pub color_space: ColorSpaceRef,
+    /// 图案资源引用（18-03 §十六，预留）。
+    #[serde(default)]
+    pub pattern: PatternRef,
 }
 
 impl PathObject {
     /// 构造路径数据。
     pub fn new(commands: Vec<PathCommand>, stroke: Option<Color>, fill: Option<Color>) -> Self {
         Self {
+            stroke_value: stroke.as_ref().map(ColorValue::from_color),
+            fill_value: fill.as_ref().map(ColorValue::from_color),
+            color_space: ColorSpaceRef::default(),
+            pattern: PatternRef::default(),
             commands,
             stroke,
             fill,

@@ -10,6 +10,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard};
+use std::time::Instant;
 
 use dw_core::document::{Document, DocumentMetadata};
 use dw_core::error::DriverError;
@@ -22,6 +23,7 @@ use crate::intermediate::ParseWarning;
 use crate::metadata_parser::MetadataParser;
 use crate::object_map::ObjectMapper;
 use crate::page_parser::PageParser;
+use crate::parse_result::{ParseReport, ParseResult};
 
 /// 解析状态：只存结果与计数，不持有 Document / Workspace。
 #[derive(Debug, Default)]
@@ -59,12 +61,14 @@ impl PdfParser {
     }
 
     /// 全量解析：先建立全部页面空壳，再逐页解析对象树。
-    pub fn parse(&self, document: &Document) -> Result<ObjectTree, DriverError> {
+    ///
+    /// 返回 `ParseResult` 是 AD-2 冻结的唯一整体入口契约。
+    pub fn parse(&self, document: &Document) -> Result<ParseResult, DriverError> {
         self.load(document, true)
     }
 
     /// 懒解析：只解析第一页，其它页留到首次 `parse_page()`。
-    pub fn parse_first_page(&self, document: &Document) -> Result<ObjectTree, DriverError> {
+    pub fn parse_first_page(&self, document: &Document) -> Result<ParseResult, DriverError> {
         self.load(document, false)
     }
 
@@ -132,7 +136,8 @@ impl PdfParser {
     }
 
     /// 加载文档：元数据 → 页树 → 可选全量解析。
-    fn load(&self, document: &Document, all_pages: bool) -> Result<ObjectTree, DriverError> {
+    fn load(&self, document: &Document, all_pages: bool) -> Result<ParseResult, DriverError> {
+        let started = Instant::now();
         // 第一步：复用 17 的元数据采集，禁止第二套解析。
         let metadata = MetadataParser::new().parse(document)?;
         let path: PathBuf = document
@@ -197,7 +202,12 @@ impl PdfParser {
                 ));
             }
         }
-        Ok(self.tree())
+        let tree = self.tree();
+        let warnings = self.warnings();
+        Ok(ParseResult::new(
+            tree.clone(),
+            ParseReport::build(&tree, warnings, started.elapsed()),
+        ))
     }
 
     /// 单页内部解析：资源 → 内容流 → 中间页 → ObjectMapper → Object Tree。

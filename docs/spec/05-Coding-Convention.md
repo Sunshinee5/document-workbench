@@ -277,7 +277,9 @@ Session       → crates/dw-core/src/session.rs
 | `ObjectMapper` | `crates/dw-pdf/src/object_map.rs` | 已落地（`07` 18-01 骨架；18-03 补全双向映射） |
 | `PdfParser` / `ParseContext` / `ResourceCache` | `crates/dw-pdf/src/parser.rs` / `parse_context.rs` | 待补（`08` 18-02；唯一 PDF 内容解析入口） |
 | `ObjectTree` / `ObjectTreeBuilder` | `crates/dw-core/src/object_tree.rs` | 待补（`08` 18-02；领域模型，持页缓存） |
-| `ObjectKind::Unknown` / `UnknownObject` | `crates/dw-core/src/object.rs` | 待补（`08` 18-02；未知 Operator 必须保留） |
+| `ObjectKind::Unknown` / `UnknownObject` | `crates/dw-core/src/object.rs` | 已落地（18-02；未知 Operator 必须保留） |
+| `ParseResult` / `ParseReport` | `crates/dw-pdf/src/parse_result.rs` | 待补（`09` 18-03；Parser 唯一返回） |
+| `MapperSchemaVersion` | `crates/dw-pdf/src/object_map.rs` | 待补（`09` 18-03；模型演进由 Mapper 统一管理） |
 | `PdfSaver`（增量 + 全量写盘） | `crates/dw-pdf/src/save.rs` | 已落地（Feature-04；`apply_changes()` 只改 lopdf 对象，写盘在 save/full_save） |
 | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | `crates/dw-core/src/error.rs` | 已落地（`capability_gate` 抛 `CapabilityNotSupported` 作**内部信号**，`TaskManager::submit` 转 `TaskRejected` 作**对外唯一出口**，见 `00` §4.4） |
 | `Event` / `EventBus` | `crates/dw-core/src/eventbus.rs` | 已落地 |

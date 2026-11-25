@@ -8,7 +8,7 @@
 
 use std::collections::BTreeMap;
 
-use dw_core::object::{BBox, ObjectId, Transform};
+use dw_core::object::{BBox, ObjectId, ObjectLifecycle, Transform};
 use dw_core::page::{PageId, Rect, Size};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -132,6 +132,13 @@ pub struct IntermediateNode {
     pub transform: Transform,
     /// `Do` 引用的图片 XObject 描述；非图片为 `None`。
     pub image: Option<IntermediateImage>,
+    /// 单向映射时携带的对象版本；正向映射据此设置 `Object.version`（默认 1）。
+    ///
+    /// 这是映射层的中性同步字段，不是第二套对象模型：反向映射由 Object 原样回填，
+    /// 保证 Round Trip 的 Version 一致（18-03 AD-4 / §十一）。
+    pub version: u64,
+    /// 映射层同步的生命周期；正向映射据此设置 `Object.lifecycle`。
+    pub lifecycle: ObjectLifecycle,
 }
 
 impl IntermediateNode {
@@ -163,6 +170,8 @@ impl IntermediateNode {
             unicode: None,
             transform: Transform::IDENTITY,
             image: None,
+            version: 1,
+            lifecycle: ObjectLifecycle::Loaded,
         }
     }
 

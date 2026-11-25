@@ -14,6 +14,7 @@ pub mod metadata_parser;
 pub mod object_map;
 pub mod page_parser;
 pub mod parse_context;
+pub mod parse_result;
 pub mod parser;
 pub mod resource_parser;
 

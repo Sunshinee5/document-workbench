@@ -143,7 +143,10 @@ fn pt02_object_tree_counts() {
     let path = temp_path("pt02");
     write_sample_pdf(&path, Sample::Normal);
     let parser = PdfParser::new();
-    let tree = parser.parse(&core_document(&path)).expect("解析应成功");
+    let tree = parser
+        .parse(&core_document(&path))
+        .expect("解析应成功")
+        .tree;
 
     assert_eq!(tree.page_count(), 2);
     assert_eq!(tree.parsed_page_count(), 2);
@@ -176,7 +179,7 @@ fn pt03_stable_ids_across_ten_parses() {
 
     for _ in 0..10 {
         let parser = PdfParser::new();
-        let tree = parser.parse(&document).expect("重复解析应成功");
+        let tree = parser.parse(&document).expect("重复解析应成功").tree;
         let snapshot = object_snapshot(&tree);
         assert_eq!(snapshot.len(), 7);
         match &baseline {
@@ -194,7 +197,10 @@ fn pt04_unknown_operators_are_preserved() {
     let path = temp_path("pt04");
     write_sample_pdf(&path, Sample::Normal);
     let parser = PdfParser::new();
-    let tree = parser.parse(&core_document(&path)).expect("解析应成功");
+    let tree = parser
+        .parse(&core_document(&path))
+        .expect("解析应成功")
+        .tree;
 
     let first = tree.get_page(PageId::new(1)).expect("第一页应存在");
     let unknown: Vec<&str> = first
@@ -223,7 +229,10 @@ fn pt05_font_is_resolved_once() {
     let path = temp_path("pt05");
     write_sample_pdf(&path, Sample::RepeatedFont);
     let parser = PdfParser::new();
-    let tree = parser.parse(&core_document(&path)).expect("解析应成功");
+    let tree = parser
+        .parse(&core_document(&path))
+        .expect("解析应成功")
+        .tree;
 
     assert_eq!(parser.last_font_resolve_count(), 1);
     assert_eq!(
@@ -245,7 +254,8 @@ fn pt06_lazy_parse_only_first_page() {
     let parser = PdfParser::new();
     let tree = parser
         .parse_first_page(&core_document(&path))
-        .expect("懒解析应成功");
+        .expect("懒解析应成功")
+        .tree;
 
     assert_eq!(tree.page_count(), 2);
     assert_eq!(tree.parsed_page_count(), 1);
@@ -299,7 +309,8 @@ fn pt08_corrupted_operations_are_recovered() {
     let parser = PdfParser::new();
     let tree = parser
         .parse(&core_document(&path))
-        .expect("损坏页不应阻断文档");
+        .expect("损坏页不应阻断文档")
+        .tree;
 
     assert_eq!(tree.page_count(), 1);
     assert_eq!(tree.parsed_page_count(), 1);
