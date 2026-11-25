@@ -274,7 +274,10 @@ Session       → crates/dw-core/src/session.rs
 | `PdfPoint` / `ScreenPoint` / `CoordinateConverter` | `crates/dw-core/src/coordinate.rs` | 待补（`07` 18-01；纯数据计算，不渲染） |
 | `HitResult` | `crates/dw-core/src/hittest.rs` | 待补（`07` 18-01；Engine 归 18-02） |
 | `Capability::ObjectEditing` | `crates/dw-core/src/capability.rs` | 待补（`07` 18-01；与 `Edit` 并存） |
-| `ObjectMapper` | `crates/dw-pdf/src/object_map.rs` | 待补（`07` 18-01；供 `apply_changes()` 调用） |
+| `ObjectMapper` | `crates/dw-pdf/src/object_map.rs` | 已落地（`07` 18-01 骨架；18-03 补全双向映射） |
+| `PdfParser` / `ParseContext` / `ResourceCache` | `crates/dw-pdf/src/parser.rs` / `parse_context.rs` | 待补（`08` 18-02；唯一 PDF 内容解析入口） |
+| `ObjectTree` / `ObjectTreeBuilder` | `crates/dw-core/src/object_tree.rs` | 待补（`08` 18-02；领域模型，持页缓存） |
+| `ObjectKind::Unknown` / `UnknownObject` | `crates/dw-core/src/object.rs` | 待补（`08` 18-02；未知 Operator 必须保留） |
 | `PdfSaver`（增量 + 全量写盘） | `crates/dw-pdf/src/save.rs` | 已落地（Feature-04；`apply_changes()` 只改 lopdf 对象，写盘在 save/full_save） |
 | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | `crates/dw-core/src/error.rs` | 已落地（`capability_gate` 抛 `CapabilityNotSupported` 作**内部信号**，`TaskManager::submit` 转 `TaskRejected` 作**对外唯一出口**，见 `00` §4.4） |
 | `Event` / `EventBus` | `crates/dw-core/src/eventbus.rs` | 已落地 |

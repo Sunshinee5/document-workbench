@@ -6,9 +6,16 @@
 //! Stage 2 范围：读取元数据（标题 / 作者 / 页数 / 文件大小 / 修改时间）。
 //! Stage 3 才做结构编辑（旋转 / 删页 / 合并 / 拆分）。
 
+pub mod content_stream;
 pub mod edit;
+pub mod intermediate;
 pub mod metadata;
+pub mod metadata_parser;
 pub mod object_map;
+pub mod page_parser;
+pub mod parse_context;
+pub mod parser;
+pub mod resource_parser;
 
 use dw_core::capability::{Capability, CapabilitySet};
 use dw_core::context::ExecutionContext;

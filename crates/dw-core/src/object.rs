@@ -93,6 +93,8 @@ pub enum ObjectKind {
     Annotation,
     /// 表单域。
     Form,
+    /// 未知 Operator：由 Parser 解析、ObjectMapper 映射，Save 原样保留（08 AD-02）。
+    Unknown,
     /// 未来扩展占位。
     Future,
 }
@@ -106,6 +108,7 @@ impl ObjectKind {
             ObjectKind::Path => "路径",
             ObjectKind::Annotation => "批注",
             ObjectKind::Form => "表单",
+            ObjectKind::Unknown => "未知对象",
             ObjectKind::Future => "未定义类型",
         }
     }
@@ -378,6 +381,36 @@ pub struct FormObject {
     pub field_name: String,
 }
 
+/// 未知内容流对象（`08` AD-02、§十）。
+///
+/// 任何第一阶段不支持的 Operator 都禁止丢弃，必须原样保留 operator、operands 与
+/// 来源 xref，供 18-08 的 Content Stream Rewrite 写回 PDF。operands 用 `serde_json::Value`
+/// 做中性存储：不依赖 lopdf 类型，领域层因此保持与第三方库解耦。
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct UnknownObject {
+    /// 原始 Operator 名（如 `q`、`cm`、损坏行的 `<corrupted>`）。
+    pub operator: String,
+    /// 原始操作数，按出现顺序保留。
+    pub operands: Vec<serde_json::Value>,
+    /// 来源内容流的 lopdf xref 对象号。
+    pub stream_ref: Option<u64>,
+}
+
+impl UnknownObject {
+    /// 构造未知对象数据。
+    pub fn new(
+        operator: impl Into<String>,
+        operands: Vec<serde_json::Value>,
+        stream_ref: Option<u64>,
+    ) -> Self {
+        Self {
+            operator: operator.into(),
+            operands,
+            stream_ref,
+        }
+    }
+}
+
 /// 类型专属数据：新增类型只扩展本枚举与 `ObjectKind`，不新增对象基类。
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ObjectPayload {
@@ -391,6 +424,8 @@ pub enum ObjectPayload {
     Annotation(AnnotationObject),
     /// 表单占位数据。
     Form(FormObject),
+    /// 未知 Operator 数据（禁止丢弃，可原样写回）。
+    Unknown(UnknownObject),
     /// 未来类型占位：无专属数据。
     Future,
 }
@@ -520,6 +555,26 @@ impl Object {
         )
     }
 
+    /// 构造未知 Operator 对象：由 ObjectMapper 在映射中间节点时调用。
+    pub fn unknown(
+        object_id: ObjectId,
+        page_id: PageId,
+        bbox: BBox,
+        z_index: i32,
+        stream_ref: Option<u64>,
+        unknown: UnknownObject,
+    ) -> Self {
+        Self::new(
+            object_id,
+            page_id,
+            bbox,
+            z_index,
+            ObjectKind::Unknown,
+            stream_ref,
+            ObjectPayload::Unknown(unknown),
+        )
+    }
+
     /// 构造未来类型占位对象。
     pub fn future(
         object_id: ObjectId,
@@ -633,6 +688,14 @@ impl Object {
     pub fn as_path(&self) -> Option<&PathObject> {
         match &self.payload {
             ObjectPayload::Path(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    /// 取未知对象数据；类型不符返回 `None`，供 Save Pipeline 原样写回。
+    pub fn as_unknown(&self) -> Option<&UnknownObject> {
+        match &self.payload {
+            ObjectPayload::Unknown(unknown) => Some(unknown),
             _ => None,
         }
     }
@@ -791,6 +854,36 @@ mod tests {
         .mark_loaded();
         assert_eq!(object.lifecycle, ObjectLifecycle::Loaded);
         assert!(!object.lifecycle.needs_persist());
+    }
+
+    /// 未知对象属于统一对象模型：可构造、可标记 Loaded、可 JSON 往返（08 AD-02）。
+    #[test]
+    fn unknown_object_is_part_of_unified_model() {
+        let unknown = UnknownObject::new(
+            "q",
+            vec![serde_json::json!(1), serde_json::json!("/F1")],
+            Some(42),
+        );
+        let object = Object::unknown(
+            ObjectId(7),
+            PageId::new(1),
+            BBox::new(0.0, 0.0, 1.0, 1.0),
+            3,
+            Some(42),
+            unknown,
+        )
+        .mark_loaded();
+        assert_eq!(object.kind, ObjectKind::Unknown);
+        assert_eq!(object.kind.label(), "未知对象");
+        assert_eq!(object.lifecycle, ObjectLifecycle::Loaded);
+        let payload = object.as_unknown().expect("未知数据应可取出");
+        assert_eq!(payload.operator, "q");
+        assert_eq!(payload.operands.len(), 2);
+        assert_eq!(payload.stream_ref, Some(42));
+
+        let json = serde_json::to_string(&object).expect("未知对象应可序列化");
+        let decoded: Object = serde_json::from_str(&json).expect("未知对象应可反序列化");
+        assert_eq!(decoded, object);
     }
 
     /// 已删除对象不得被改回 Modified，且不再存活。

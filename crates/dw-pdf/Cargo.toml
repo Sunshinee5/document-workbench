@@ -9,6 +9,9 @@ dw-core = { path = "../dw-core" }
 # 日志设施（Infrastructure）：只调用分级函数，不引入第三方日志 crate（`05` R18）。
 dw-log = { path = "../dw-log" }
 lopdf = "0.34"
+# 18-02 Parser：Intermediate / ParseContext 需要 serde 派生与 JSON 表达 operands。
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [dev-dependencies]
 serde_json = "1"

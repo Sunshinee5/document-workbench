@@ -18,6 +18,7 @@ pub mod eventbus;
 pub mod hittest;
 pub mod lifecycle;
 pub mod object;
+pub mod object_tree;
 pub mod page;
 pub mod recovery;
 pub mod selection;

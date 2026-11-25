@@ -558,7 +558,8 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | SaveCommand / SaveAsCommand / SaveTask | `crates/dw-core/src/command.rs` / `crates/dw-core/src/task.rs` | `SaveCommand` / `SaveAsCommand` / `SaveTask` / `CommandKind::SaveAs` | 已落地（Feature-04；`records_history() = false`） |
 | Object Model（18-01） | `crates/dw-core/src/object.rs` / `page.rs` / `coordinate.rs` / `hittest.rs` | `Object` / `ObjectId` / `ObjectKind` / `Page` / `PageId` / `CoordinateConverter` / `HitResult` | 待补（`07` 冻结，本章实现） |
 | ObjectEditing 能力 | `crates/dw-core/src/capability.rs` | `Capability::ObjectEditing`（与 `Edit` 并存） | 待补（`07` 冻结） |
-| Object → lopdf Mapping | `crates/dw-pdf/src/object_map.rs` | `ObjectMapper`（供 `apply_changes()` 调用） | 待补（`07` 冻结） |
+| Object → lopdf Mapping | `crates/dw-pdf/src/object_map.rs` | `ObjectMapper`（供 `apply_changes()` 调用） | 已落地（18-01 骨架）/ 18-03 补全 |
+| PDF Object Parser | `crates/dw-pdf/src/parser.rs` 等 6 文件 | `PdfParser` / `ParseContext` / `ObjectTree` / `UnknownObject` | 待补（`08` 冻结，本章实现） |
 | Diff | `crates/dw-core/src/diff.rs` | `Diff` / `StructureDiff` / `BinaryDiff` / `DiffRef` / `CheckpointRef` / `RotationDiff` / `DeletePageDiff` / `MovePageDiff` | 已落地（Feature-02 起由 Task 构造） |
 | Selection | `crates/dw-core/src/selection.rs` | `Selection` | 已落地 |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |

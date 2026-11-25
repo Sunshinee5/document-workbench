@@ -6,7 +6,7 @@ Windows 本地绿色版文档工作台。本目录是项目的**唯一规范来�
 
 ```
 docs/
-├── spec/          8 份正式规范（唯一事实源，Agent 做决定只依据这里）
+├── spec/          9 份正式规范（唯一事实源，Agent 做决定只依据这里）
 ├── features/      Feature 文档（06~12 层：一个 Feature 一个文件，无架构裁定权）
 ├── guides/        实施指南（无规范权：告诉你「现在怎么开发」）
 ├── records/       过程记录（评审、验证、核对、收口报告）
@@ -26,7 +26,7 @@ docs/
 
 Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite** / **Dependency** / **Implementation Order** / **Failure Policy**（`15` 起，格式见 `spec/05` §8）。下一个 Feature 直接引用上一个的 `Provides`。
 
-## 八份规范
+## 九份规范
 
 | 文件 | 内容 | 何时读 |
 |------|------|--------|
@@ -38,6 +38,7 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
 | `spec/05-Coding-Convention.md` | 编码规范：21 条禁令、命名规则、Rust 规范、代码驱动四问、Rust Mapping 要求、自检清单、**附录 A 架构兼容性检查** | **每天写代码时** |
 | `spec/06-Testing-and-Acceptance-R1.1.md` | 测试与验收规范：六层金字塔、Failure / Boundary / Transaction / Recovery、Release Report、**三 Gate**、Agent 提交规范 | 每个 Feature 开发完与合并前 |
 | `spec/07-PDF-Object-Model-R1.md` | **18-01 Editor Engine Core**：统一 Object Model、Document→Page→Object 树、稳定 ObjectId、坐标转换、HitResult、Object 级 Diff；18/19/20/OCR/AI/批注/表单唯一对象来源 | 开始 18 及以后任何对象编辑前 |
+| `spec/08-PDF-Object-Parser-R1.md` | **18-02 PDF Object Parser**：唯一 PDF 内容解析入口、ParseContext/ResourceCache、稳定 ID、UnknownObject、懒解析与页缓存、PT-01~08 | 实现 18-02 及任何需要读 PDF 内容的模块前 |
 
 ## 指南（无规范权）
 
@@ -67,7 +68,8 @@ Feature 文档固定八节：目标 / 范围 / 实现 / 验收 / **Prerequisite*
   > 05 Coding Convention
   > 06 Testing & Acceptance（测试流程规范，不改架构）
   > 07 PDF Object Model（Engine Core 底座，18+ 唯一对象来源）
-  > 08~12 Implementation Spec / features/（无架构裁定权）
+  > 08 PDF Object Parser（唯一 PDF 内容解析入口）
+  > 09~12 Implementation Spec / features/（无架构裁定权）
   > 13+ Implementation Guide / guides/（无规范权）
   > records/（仅溯源）> archive/（全部作废）
 ```
