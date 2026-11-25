@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::document::{Document, PageLayout};
 use crate::error::DwError;
+use crate::object::ObjectId;
 
 /// Diff 引用：指向 `Recovery/session-XXX/diffs/` 下的具体文件。
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -66,6 +67,26 @@ pub struct MovePageDiff {
     pub to: u32,
 }
 
+/// 对象级 Diff 载荷（`07` 裁决 10/11/12）。
+///
+/// 装在 `StructureDiff.payload` 里，**不新增 Diff 顶层变体**，不破坏「结构 / 二进制」两档结构。
+/// 变化判据是 Object 的 version（before/after），不是 Document 的 Dirty。
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ObjectDiffPayload {
+    /// 被修改的对象。
+    pub object_id: ObjectId,
+    /// 对象级操作名（如 TextReplace / ImageReplace / ObjectDelete）。
+    pub operation: String,
+    /// 修改前版本号。
+    pub before_version: u64,
+    /// 修改后版本号。
+    pub after_version: u64,
+    /// 修改前快照（JSON）。
+    pub before: serde_json::Value,
+    /// 修改后快照（JSON）。
+    pub after: serde_json::Value,
+}
+
 impl Diff {
     /// 旋转 Diff：`operation` 固定为 `RotatePages`。
     pub fn rotation(payload: &RotationDiff) -> Self {
@@ -80,6 +101,13 @@ impl Diff {
     /// 移页 Diff：`operation` 固定为 `MovePages`。
     pub fn move_page(payload: &MovePageDiff) -> Self {
         Self::structure("MovePages", payload)
+    }
+
+    /// 对象级 Diff：`operation` 固定为 `ObjectChange`，载荷含 ObjectId 与版本区间。
+    ///
+    /// 回放实现归 18-02 起的章节；本章只冻结数据与规则（裁决 10/11/12）。
+    pub fn object_change(payload: &ObjectDiffPayload) -> Self {
+        Self::structure("ObjectChange", payload)
     }
 
     /// 统一的结构 Diff 构造口；序列化失败时退化为 Null，绝不 panic 在回放链上。
@@ -140,6 +168,16 @@ fn apply_structure(document: &Document, diff: &StructureDiff) -> Result<(), DwEr
             let payload: MovePageDiff = decode(&diff.payload)?;
             move_page(&mut layout, payload.from, payload.to)?;
         }
+        "ObjectChange" => {
+            // 对象级回放不改 PageLayout，先解码校验载荷，再明确报告「待后续章节实现」。
+            let payload: ObjectDiffPayload = decode(&diff.payload)?;
+            return Err(DwError::Execution(format!(
+                "对象级 Diff 回放待 18-02（对象 {}，版本 {} → {}）",
+                payload.object_id.raw(),
+                payload.before_version,
+                payload.after_version
+            )));
+        }
         other => return Err(DwError::Execution(format!("未知 Diff 操作：{}", other))),
     }
     document.set_page_layout(layout);
@@ -161,6 +199,15 @@ fn revert_structure(document: &Document, diff: &StructureDiff) -> Result<(), DwE
         "MovePages" => {
             let payload: MovePageDiff = decode(&diff.payload)?;
             move_page(&mut layout, payload.to, payload.from)?;
+        }
+        "ObjectChange" => {
+            let payload: ObjectDiffPayload = decode(&diff.payload)?;
+            return Err(DwError::Execution(format!(
+                "对象级 Diff 反向回放待 18-02（对象 {}，版本 {} → {}）",
+                payload.object_id.raw(),
+                payload.before_version,
+                payload.after_version
+            )));
         }
         other => return Err(DwError::Execution(format!("未知 Diff 操作：{}", other))),
     }
@@ -259,4 +306,57 @@ pub enum Diff {
     Structure(StructureDiff),
     /// 二进制 Diff。
     Binary(BinaryDiff),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// 对象级 Diff 载荷 JSON 往返：ObjectId 与版本区间必须完整保留。
+    #[test]
+    fn object_diff_payload_roundtrips() {
+        let payload = ObjectDiffPayload {
+            object_id: ObjectId(7),
+            operation: "TextReplace".to_string(),
+            before_version: 2,
+            after_version: 3,
+            before: serde_json::json!({ "unicode": "旧" }),
+            after: serde_json::json!({ "unicode": "新" }),
+        };
+        let json = serde_json::to_string(&payload).expect("载荷应可序列化");
+        let decoded: ObjectDiffPayload = serde_json::from_str(&json).expect("载荷应可反序列化");
+        assert_eq!(decoded, payload);
+    }
+
+    /// 对象级 Diff 走结构档，不新增 Diff 顶层变体；回放明确报「待 18-02」。
+    #[test]
+    fn object_change_diff_is_structure_and_reports_pending() {
+        let payload = ObjectDiffPayload {
+            object_id: ObjectId(9),
+            operation: "TextReplace".to_string(),
+            before_version: 1,
+            after_version: 2,
+            before: serde_json::Value::Null,
+            after: serde_json::json!({ "unicode": "新" }),
+        };
+        let diff = Diff::object_change(&payload);
+        let Diff::Structure(structure) = &diff else {
+            panic!("对象级 Diff 必须装入结构档");
+        };
+        assert_eq!(structure.operation, "ObjectChange");
+
+        let document = crate::document::Document::new(
+            crate::document::DocumentId(1),
+            crate::document::DocumentKind::Pdf,
+            crate::capability::CapabilitySet::new(),
+        );
+        let error = diff
+            .apply(&document)
+            .expect_err("本章对象级回放应返回待实现");
+        assert!(error.to_string().contains("18-02"));
+        let error = diff
+            .revert(&document)
+            .expect_err("本章对象级反向回放应返回待实现");
+        assert!(error.to_string().contains("18-02"));
+    }
 }

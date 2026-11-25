@@ -21,8 +21,10 @@ pub enum Capability {
     Export,
     /// 打印。
     Print,
-    /// 编辑。
+    /// 页面级编辑（旋转 / 删除 / 移动，15 起使用）。
     Edit,
+    /// 对象级内容编辑（文本 / 图片 / OCR，18 起使用；与 `Edit` 并存，`07` 裁决 7）。
+    ObjectEditing,
 }
 
 /// 能力集合：挂在 Document 与 ExecutionContext 上。

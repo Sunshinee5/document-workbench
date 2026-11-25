@@ -122,6 +122,8 @@ impl DocumentKind {
                     Capability::Render,
                     Capability::Search,
                     Capability::Edit,
+                    // 18-01：对象级内容编辑能力（与页面级 Edit 并存，`07` 裁决 7）。
+                    Capability::ObjectEditing,
                     Capability::Export,
                     Capability::Print,
                 ] {

@@ -8,6 +8,7 @@
 
 pub mod edit;
 pub mod metadata;
+pub mod object_map;
 
 use dw_core::capability::{Capability, CapabilitySet};
 use dw_core::context::ExecutionContext;

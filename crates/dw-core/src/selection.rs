@@ -3,13 +3,21 @@
 //! Feature-02 起承载页选择：Ctrl 点选（追加/取消）、Shift 连选（区间）、框选（替换）。
 //! 冻结约束：Selection 绝不写进 Document；当前页真值仍在工作区 `view_state`。
 
-/// 选择集：页位置（1 起）与区间锚点。
+use crate::object::ObjectId;
+
+/// 选择集：**冻结为 Collection 双轨**（`07` 裁决 4）。
+///
+/// `pages` 承载页选择（15 已用），`objects` 承载对象选择（18-01 新增）。
+/// 二者都是文档标识、不是屏幕坐标；禁止退化为 `current_page` / `current_object` 单值形态——
+/// AI / OCR / Annotation 都需要多选，集合是唯一形态。
 #[derive(Debug, Clone, Default)]
 pub struct Selection {
     /// 已选页位置，按选择顺序保存；展示时由调用方排序。
     pages: Vec<u32>,
     /// Shift 连选的锚点。
     anchor: Option<u32>,
+    /// 已选对象标识（18-01 起）：与页选择互不干扰。
+    objects: Vec<ObjectId>,
 }
 
 impl Selection {
@@ -23,10 +31,40 @@ impl Selection {
         self.pages.is_empty()
     }
 
-    /// 清空选择（点击空白处 / 编辑完成后调用）。
+    /// 清空选择（点击空白处 / 编辑完成后调用）：页与对象双轨一起清。
     pub fn clear(&mut self) {
         self.pages.clear();
         self.anchor = None;
+        self.objects.clear();
+    }
+
+    /// 当前选中的对象标识（18-01 双轨之一）。
+    pub fn objects(&self) -> &[ObjectId] {
+        &self.objects
+    }
+
+    /// 是否没有选中任何对象。
+    pub fn objects_is_empty(&self) -> bool {
+        self.objects.is_empty()
+    }
+
+    /// 替换对象选择：框选 / 单选对象时调用，不动页选择。
+    pub fn replace_objects(&mut self, objects: Vec<ObjectId>) {
+        self.objects = objects;
+    }
+
+    /// Ctrl 点选对象：已选则取消，未选则追加。
+    pub fn toggle_object(&mut self, object_id: ObjectId) {
+        if let Some(index) = self.objects.iter().position(|item| *item == object_id) {
+            self.objects.remove(index);
+        } else {
+            self.objects.push(object_id);
+        }
+    }
+
+    /// 清空对象选择，保留页选择。
+    pub fn clear_objects(&mut self) {
+        self.objects.clear();
     }
 
     /// 替换式选择（框选、单选）：同时重置区间锚点。
@@ -110,5 +148,37 @@ mod tests {
         selection.replace(vec![2, 4, 5]);
         selection.after_delete(&[1, 3]);
         assert_eq!(selection.pages(), &[1, 2, 3]);
+    }
+
+    /// 双轨互不干扰：改对象选择不影响页选择，反之亦然；clear 两者一起清。
+    #[test]
+    fn pages_and_objects_are_independent_tracks() {
+        use crate::object::ObjectId;
+
+        let mut selection = Selection::default();
+        selection.replace(vec![2, 3]);
+        selection.replace_objects(vec![ObjectId(10), ObjectId(11)]);
+        assert_eq!(selection.pages(), &[2, 3]);
+        assert_eq!(selection.objects(), &[ObjectId(10), ObjectId(11)]);
+
+        selection.toggle_object(ObjectId(10));
+        assert_eq!(selection.objects(), &[ObjectId(11)]);
+        assert_eq!(selection.pages(), &[2, 3], "改对象选择不得影响页选择");
+
+        selection.toggle(5);
+        assert_eq!(selection.pages(), &[2, 3, 5]);
+        assert_eq!(
+            selection.objects(),
+            &[ObjectId(11)],
+            "改页选择不得影响对象选择"
+        );
+
+        selection.clear_objects();
+        assert!(selection.objects_is_empty());
+        assert_eq!(selection.pages(), &[2, 3, 5]);
+
+        selection.clear();
+        assert!(selection.is_empty());
+        assert!(selection.objects_is_empty());
     }
 }
