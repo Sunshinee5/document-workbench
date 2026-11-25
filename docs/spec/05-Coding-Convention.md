@@ -285,7 +285,11 @@ Session       → crates/dw-core/src/session.rs
 | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | `crates/dw-core/src/error.rs` | 已落地（`capability_gate` 抛 `CapabilityNotSupported` 作**内部信号**，`TaskManager::submit` 转 `TaskRejected` 作**对外唯一出口**，见 `00` §4.4） |
 | `Event` / `EventBus` | `crates/dw-core/src/eventbus.rs` | 已落地 |
 | `IExecutable` / `IPausable` / `HealthStatus` / `IHealthCheck` | `crates/dw-core/src/lifecycle.rs` | 已落地 |
-| `Selection` | `crates/dw-core/src/selection.rs` | 已落地（空 struct，无字段） |
+| `Selection` | `crates/dw-core/src/selection.rs` | 已落地（`pages` + `anchor`；对象轨道 18-05 已迁出到 `SelectionState`） |
+| `SelectionState` / `SelectionVersion` / `SelectionSnapshot` | `crates/dw-core/src/selection.rs` | 已落地（`11` 18-05；**唯一对象选择真值**，属 Session，只存 `ObjectId`） |
+| `SelectionEngine` / `SelectionHistory` / `SelectionCommand` / `SelectionRequest` / `SelectionPolicy` / `ModifierKeys` / `SelectionChange` / `SelectionValidation` | `crates/dw-core/src/selection.rs` | 已落地（`11` 18-05；唯一修改入口，不持有 EventBus、不调用 HitTest） |
+| `EventPayload` | `crates/dw-core/src/eventbus.rs` | 已落地（`11` 18-05；`SelectionChanged` 携带 old/new） |
+| `Page::version()` / `SpatialIndex::version()` / `PageIndexCache::version()` | `crates/dw-core/src/page.rs` / `hittest.rs` | 已落地（`11` 18-05；`page_version` 为派生值不落字段，`index_version` 属运行时优化） |
 | `SessionState` / `DocumentStore` / `CommandRecord` / `History` / `Session` / `SessionId` / `SessionManager` / `CheckpointStore` | `crates/dw-core/src/session.rs` | 已落地（Session 成员固定 6 项，含 `CheckpointStore`） |
 | `SavePoint` + `Session.save_point` | `crates/dw-core/src/session.rs` | 已落地（Feature-04） |
 | `RecoveryStore` / `SessionRecoveryInfo` | `crates/dw-core/src/recovery.rs` | 已落地（Feature-04；纯文件 I/O，不是第 4 个架构 Store、不进链） |

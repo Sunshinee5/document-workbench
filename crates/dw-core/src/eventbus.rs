@@ -1,12 +1,26 @@
 //! EventBus 横切事件总线，不进入执行链；Task 完成等通知经此发布，UI 只监听不直调 Task。
 
-/// 事件对象：Stage 1 只承载事件种类与中文描述，避免引入新层。
+use crate::selection::SelectionChange;
+
+/// 事件结构化载荷（`11` §十）。
+///
+/// `Event` 原本只有种类与中文描述；`SelectionChanged` 必须携带
+/// `old_selection` / `new_selection`，故用可选载荷承载，避免监听方再去反解文案。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum EventPayload {
+    /// `SelectionChanged` 的完整前后状态。
+    Selection(Box<SelectionChange>),
+}
+
+/// 事件对象：承载事件种类、中文描述与可选结构化载荷。
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     /// 事件种类，例如 TaskCompleted。
     pub kind: String,
     /// 中文事件描述。
     pub message: String,
+    /// 结构化载荷；纯通知类事件为 `None`。
+    pub payload: Option<EventPayload>,
 }
 
 impl Event {
@@ -15,7 +29,32 @@ impl Event {
         Self {
             kind: kind.into(),
             message: message.into(),
+            payload: None,
         }
+    }
+
+    /// 附带结构化载荷。
+    pub fn with_payload(mut self, payload: EventPayload) -> Self {
+        self.payload = Some(payload);
+        self
+    }
+
+    /// `SelectionChanged`（`11` §十）：选择状态变化后发布。
+    ///
+    /// 载荷为完整 `SelectionChange`，Inspector / Toolbar / Canvas 统一监听此事件。
+    pub fn selection_changed(change: SelectionChange) -> Self {
+        let message = format!(
+            "选择已变化：{} → {} 个对象{}",
+            change.old.selected().len(),
+            change.new.selected().len(),
+            change
+                .new
+                .primary()
+                .map(|id| format!("，主对象 {}", id.0))
+                .unwrap_or_default()
+        );
+        Self::new("SelectionChanged", message)
+            .with_payload(EventPayload::Selection(Box::new(change)))
     }
 
     /// `TaskFinished`：Task 成功结束（`01` §6 冻结的 6 类事件之一）。

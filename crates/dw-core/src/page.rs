@@ -175,6 +175,43 @@ impl Page {
         });
         objects
     }
+
+    /// 页面版本（`11` §十二 C-4）：对 `(object_id, object.version, lifecycle)` 做 FNV-1a 折叠。
+    ///
+    /// **派生值，不落字段**——`Page` 保持 `07` 冻结的 7 字段，`PartialEq` 与 Document 快照
+    /// 比较语义不受影响。对象增删改、`Object.version` 递增、`lifecycle` 变化都会改变结果，
+    /// 供 `SelectionState` 判断选择是否已过期。代价 O(n)，只在验证时计算，不在鼠标移动热路径。
+    pub fn version(&self) -> u64 {
+        const FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+        const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+        let mut hash = FNV_OFFSET;
+        for object in self.objects.values() {
+            for byte in object
+                .object_id
+                .0
+                .to_le_bytes()
+                .iter()
+                .chain(object.version.to_le_bytes().iter())
+                .chain([lifecycle_tag(object.lifecycle)].iter())
+            {
+                hash ^= u64::from(*byte);
+                hash = hash.wrapping_mul(FNV_PRIME);
+            }
+        }
+        // 对象数参与折叠，避免「空表」与「折叠后恰好等于 offset」两种极端撞值。
+        hash ^ (self.objects.len() as u64)
+    }
+}
+
+/// `ObjectLifecycle` 的稳定字节标签（不依赖 `as u8` 的枚举布局）。
+fn lifecycle_tag(lifecycle: crate::object::ObjectLifecycle) -> u8 {
+    use crate::object::ObjectLifecycle;
+    match lifecycle {
+        ObjectLifecycle::Created => 1,
+        ObjectLifecycle::Loaded => 2,
+        ObjectLifecycle::Modified => 3,
+        ObjectLifecycle::Deleted => 4,
+    }
 }
 
 #[cfg(test)]

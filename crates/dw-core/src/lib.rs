@@ -29,16 +29,13 @@ pub mod workspace;
 #[cfg(test)]
 mod skeleton_tests {
     use crate::capability::CapabilitySet;
-    use crate::clipboard::Clipboard;
     use crate::command::CommandKind;
     use crate::context::{CancelToken, Config, ExecutionContext, Progress};
     use crate::diff::DiffRef;
     use crate::document::{Document, DocumentId, DocumentKind};
-    use crate::selection::Selection;
     use crate::session::{
         CommandRecord, DocumentStore, History, Session, SessionManager, SessionState,
     };
-    use crate::workspace::Workspace;
 
     /// 构造一条测试用命令记录：参数与 Diff 引用按 command_id 生成，便于断言顺序。
     fn sample_record(command_id: u64) -> CommandRecord {
@@ -55,15 +52,8 @@ mod skeleton_tests {
     /// 骨架级编译测试：验证冻结类型可被构造、8 字段上下文可组装。
     #[test]
     fn frozen_types_are_constructible() {
-        let session = Session {
-            state: SessionState::Created,
-            documents: DocumentStore::new(),
-            workspace: Workspace::default(),
-            history: History::new(),
-            selection: Selection::default(),
-            clipboard: Clipboard::default(),
-            save_point: None,
-        };
+        // `selection_state` 是私有字段（`11` 约束 5），统一由 `Session::create()` 构造。
+        let session = Session::create();
         let document = Document::new(DocumentId(1), DocumentKind::Pdf, CapabilitySet::default());
         let context = ExecutionContext {
             session: &session,

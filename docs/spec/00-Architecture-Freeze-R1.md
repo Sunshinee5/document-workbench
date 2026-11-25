@@ -563,7 +563,8 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | Object Mapper（18-03） | `crates/dw-pdf/src/object_map.rs` / `parse_result.rs` | `ObjectMapper` / `ParseResult` / `ParseReport` / `MapperSchemaVersion` | 已落地（18-03） |
 | HitTest Engine（18-04） | `crates/dw-core/src/hittest.rs` | `HitTestEngine` / `SpatialIndex` / `PageIndexCache` / `ObjectPriority` | 已落地（18-04） |
 | Diff | `crates/dw-core/src/diff.rs` | `Diff` / `StructureDiff` / `BinaryDiff` / `DiffRef` / `CheckpointRef` / `RotationDiff` / `DeletePageDiff` / `MovePageDiff` | 已落地（Feature-02 起由 Task 构造） |
-| Selection | `crates/dw-core/src/selection.rs` | `Selection` | 已落地 |
+| Selection（页选择） | `crates/dw-core/src/selection.rs` | `Selection`（`pages` + `anchor`） | 已落地（对象轨道已于 18-05 迁出） |
+| Selection Engine（18-05） | `crates/dw-core/src/selection.rs` / `session.rs` / `eventbus.rs` | `SelectionState` / `SelectionSnapshot` / `SelectionEngine` / `SelectionCommand` / `SelectionChange` / `Session.selection_state` / `EventPayload` | 已落地（18-05） |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |
 | EventBus | `crates/dw-core/src/eventbus.rs` | `EventBus` / `Event` | 已落地 |
 | 错误 | `crates/dw-core/src/error.rs` | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | 已落地 |

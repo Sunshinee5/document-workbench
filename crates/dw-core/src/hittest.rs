@@ -164,6 +164,9 @@ pub struct SpatialIndex {
     cells: CellMap,
     objects: HashMap<ObjectId, Object>,
     oversized: HashSet<ObjectId>,
+    /// 运行时版本（`11` §十二）：每次 `insert` / `remove` / `clear` / `rebuild` 递增。
+    /// 供 `SelectionState.index_version` 判断选择是否已过期；不持久化、不进 PDF。
+    version: u64,
 }
 
 impl Default for SpatialIndex {
@@ -190,12 +193,18 @@ impl SpatialIndex {
             cells: HashMap::new(),
             objects: HashMap::new(),
             oversized: HashSet::new(),
+            version: 0,
         }
     }
 
     /// 当前格子边长。
     pub fn cell_size(&self) -> f64 {
         self.cell_size
+    }
+
+    /// 运行时版本：任一内容变更都会递增（`11` §十二）。
+    pub fn version(&self) -> u64 {
+        self.version
     }
 
     /// 索引内有效对象数。
@@ -221,12 +230,14 @@ impl SpatialIndex {
         }
         self.objects.insert(object_id, object.clone());
         self.register(&object);
+        self.version = self.version.wrapping_add(1);
     }
 
     /// 移除对象并返回被移除者；不存在时返回 `None`。
     pub fn remove(&mut self, object_id: ObjectId) -> Option<Object> {
         let removed = self.objects.remove(&object_id)?;
         self.unregister(&removed);
+        self.version = self.version.wrapping_add(1);
         Some(removed)
     }
 
@@ -235,6 +246,7 @@ impl SpatialIndex {
         self.cells.clear();
         self.objects.clear();
         self.oversized.clear();
+        self.version = self.version.wrapping_add(1);
     }
 
     /// 用一组对象重建索引（每次调用都是完整的 PUT 语义）。
@@ -462,6 +474,12 @@ impl PageIndexCache {
         read_map(&self.pages).contains_key(&page_id)
     }
 
+    /// 该页索引的运行时版本；未缓存时返回 `None`（`11` §十二）。
+    pub fn version(&self, page_id: PageId) -> Option<u64> {
+        let guard = read_map(&self.pages);
+        guard.get(&page_id).map(|index| read_index(index).version())
+    }
+
     /// 已缓存的页数。
     pub fn len(&self) -> usize {
         read_map(&self.pages).len()
@@ -561,6 +579,14 @@ impl HitTestEngine {
     /// 失效单页索引。
     pub fn invalidate_page(&self, page_id: PageId) -> bool {
         self.cache.invalidate(page_id)
+    }
+
+    /// 该页索引的运行时版本；未建索引时返回 `None`（`11` §十二）。
+    ///
+    /// Selection 用它比对 `index_version`：`None` 表示索引尚未建立，
+    /// 此时调用方应视为「无需比对」而非「已过期」。
+    pub fn index_version(&self, page_id: PageId) -> Option<u64> {
+        self.cache.version(page_id)
     }
 
     /// 同步单个对象变更到已缓存索引。

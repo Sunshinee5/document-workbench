@@ -15,7 +15,7 @@ use crate::clipboard::Clipboard;
 use crate::command::CommandKind;
 use crate::diff::{CheckpointRef, DiffRef};
 use crate::document::{Document, DocumentId, DocumentKind};
-use crate::selection::Selection;
+use crate::selection::{Selection, SelectionState};
 use crate::workspace::Workspace;
 
 /// Session 状态生命周期（不是 IExecutable）。
@@ -266,6 +266,8 @@ pub struct Session {
     pub history: History,
     /// 当前选择集。
     pub selection: Selection,
+    /// 对象选择唯一真值源（`11` AD-09）；只能经 `SelectionEngine` 修改。
+    selection_state: SelectionState,
     /// 当前剪贴板。
     pub clipboard: Clipboard,
     /// 最近一次成功保存的保存点；未保存过为 `None`。
@@ -281,9 +283,22 @@ impl Session {
             workspace: Workspace::new(),
             history: History::new(),
             selection: Selection::default(),
+            selection_state: SelectionState::empty(),
             clipboard: Clipboard::default(),
             save_point: None,
         }
+    }
+
+    /// 对象选择真值（只读，`11` AD-09）。
+    pub fn selection_state(&self) -> &SelectionState {
+        &self.selection_state
+    }
+
+    /// 对象选择真值的可变引用：仅供 `SelectionEngine` 使用（`11` 约束 5）。
+    ///
+    /// 故意收窄为 `pub(crate)`，UI 层拿不到，从类型上保证「不得直接修改」。
+    pub(crate) fn selection_state_mut(&mut self) -> &mut SelectionState {
+        &mut self.selection_state
     }
 
     /// Initialize：初始化会话状态。
