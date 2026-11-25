@@ -269,17 +269,18 @@ Session       → crates/dw-core/src/session.rs
 | `IDriver` / `DriverRegistry` / `DriverManager` / `NullDriver` / `EMPTY_DRIVER`（`pub const EMPTY_DRIVER: &str = "空驱动"`） | `crates/dw-core/src/driver.rs` | 已落地（`resolve -> Option<Arc<dyn IDriver>>` 为**最终形态**；`names()` 已补，见 `03` E10） |
 | `ISave` / `SaveOutcome` / `IDriver::save_provider()` | `crates/dw-core/src/driver.rs` | 已落地（Feature-04；`apply_changes()` 是 Persist Pipeline 统一入口） |
 | `SaveCommand` / `SaveAsCommand` / `SaveTask` | `crates/dw-core/src/command.rs` / `crates/dw-core/src/task.rs` | 已落地（Feature-04；`records_history() = false`，不产 Diff） |
-| `Object` / `ObjectId` / `ObjectKind` / `BBox` / `TextObject` / `ImageObject` / `PathObject` | `crates/dw-core/src/object.rs` | 待补（`07` 18-01；本章实现数据模型，不实现编辑） |
-| `Page` / `PageId` | `crates/dw-core/src/page.rs` | 待补（`07` 18-01；`Page.objects: BTreeMap<ObjectId, Object>`） |
-| `PdfPoint` / `ScreenPoint` / `CoordinateConverter` | `crates/dw-core/src/coordinate.rs` | 待补（`07` 18-01；纯数据计算，不渲染） |
-| `HitResult` | `crates/dw-core/src/hittest.rs` | 待补（`07` 18-01；Engine 归 18-02） |
-| `Capability::ObjectEditing` | `crates/dw-core/src/capability.rs` | 待补（`07` 18-01；与 `Edit` 并存） |
-| `ObjectMapper` | `crates/dw-pdf/src/object_map.rs` | 已落地（`07` 18-01 骨架；18-03 补全双向映射） |
-| `PdfParser` / `ParseContext` / `ResourceCache` | `crates/dw-pdf/src/parser.rs` / `parse_context.rs` | 待补（`08` 18-02；唯一 PDF 内容解析入口） |
-| `ObjectTree` / `ObjectTreeBuilder` | `crates/dw-core/src/object_tree.rs` | 待补（`08` 18-02；领域模型，持页缓存） |
+| `Object` / `ObjectId` / `ObjectKind` / `BBox` / `TextObject` / `ImageObject` / `PathObject` | `crates/dw-core/src/object.rs` | 已落地（18-01；本章实现数据模型，不实现编辑） |
+| `Page` / `PageId` | `crates/dw-core/src/page.rs` | 已落地（18-01；`Page.objects: BTreeMap<ObjectId, Object>`，**不持有任何索引/缓存字段**） |
+| `PdfPoint` / `ScreenPoint` / `CoordinateConverter` | `crates/dw-core/src/coordinate.rs` | 已落地（18-01；纯数据计算，不渲染） |
+| `HitResult` | `crates/dw-core/src/hittest.rs` | 已落地（18-01 四字段；18-04 扩 `distance` / `priority`） |
+| `HitTestEngine` / `SpatialIndex` / `PageIndexCache` / `ObjectPriority` | `crates/dw-core/src/hittest.rs` | 已落地（`10` 18-04；唯一命中入口，Index 生命周期属 Page、物理在 PageIndexCache） |
+| `Capability::ObjectEditing` | `crates/dw-core/src/capability.rs` | 已落地（18-01；与 `Edit` 并存） |
+| `ObjectMapper` | `crates/dw-pdf/src/object_map.rs` | 已落地（18-01 骨架；18-03 补全双向映射） |
+| `PdfParser` / `ParseContext` / `ResourceCache` | `crates/dw-pdf/src/parser.rs` / `parse_context.rs` | 已落地（18-02；唯一 PDF 内容解析入口） |
+| `ObjectTree` / `ObjectTreeBuilder` | `crates/dw-core/src/object_tree.rs` | 已落地（18-02；领域模型，持页缓存） |
 | `ObjectKind::Unknown` / `UnknownObject` | `crates/dw-core/src/object.rs` | 已落地（18-02；未知 Operator 必须保留） |
-| `ParseResult` / `ParseReport` | `crates/dw-pdf/src/parse_result.rs` | 待补（`09` 18-03；Parser 唯一返回） |
-| `MapperSchemaVersion` | `crates/dw-pdf/src/object_map.rs` | 待补（`09` 18-03；模型演进由 Mapper 统一管理） |
+| `ParseResult` / `ParseReport` | `crates/dw-pdf/src/parse_result.rs` | 已落地（18-03；Parser 唯一返回） |
+| `MapperSchemaVersion` | `crates/dw-pdf/src/object_map.rs` | 已落地（18-03；模型演进由 Mapper 统一管理） |
 | `PdfSaver`（增量 + 全量写盘） | `crates/dw-pdf/src/save.rs` | 已落地（Feature-04；`apply_changes()` 只改 lopdf 对象，写盘在 save/full_save） |
 | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | `crates/dw-core/src/error.rs` | 已落地（`capability_gate` 抛 `CapabilityNotSupported` 作**内部信号**，`TaskManager::submit` 转 `TaskRejected` 作**对外唯一出口**，见 `00` §4.4） |
 | `Event` / `EventBus` | `crates/dw-core/src/eventbus.rs` | 已落地 |

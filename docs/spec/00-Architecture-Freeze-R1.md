@@ -560,7 +560,8 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | ObjectEditing 能力 | `crates/dw-core/src/capability.rs` | `Capability::ObjectEditing`（与 `Edit` 并存） | 待补（`07` 冻结） |
 | Object → lopdf Mapping | `crates/dw-pdf/src/object_map.rs` | `ObjectMapper`（供 `apply_changes()` 调用） | 已落地（18-01 骨架）/ 18-03 补全 |
 | PDF Object Parser | `crates/dw-pdf/src/parser.rs` 等 6 文件 | `PdfParser` / `ParseContext` / `ObjectTree` / `UnknownObject` | 已落地（18-02） |
-| Object Mapper（18-03） | `crates/dw-pdf/src/object_map.rs` / `parse_result.rs` | `ObjectMapper` / `ParseResult` / `ParseReport` / `MapperSchemaVersion` | 待补（`09` 冻结，本章扩展） |
+| Object Mapper（18-03） | `crates/dw-pdf/src/object_map.rs` / `parse_result.rs` | `ObjectMapper` / `ParseResult` / `ParseReport` / `MapperSchemaVersion` | 已落地（18-03） |
+| HitTest Engine（18-04） | `crates/dw-core/src/hittest.rs` | `HitTestEngine` / `SpatialIndex` / `PageIndexCache` / `ObjectPriority` | 已落地（18-04） |
 | Diff | `crates/dw-core/src/diff.rs` | `Diff` / `StructureDiff` / `BinaryDiff` / `DiffRef` / `CheckpointRef` / `RotationDiff` / `DeletePageDiff` / `MovePageDiff` | 已落地（Feature-02 起由 Task 构造） |
 | Selection | `crates/dw-core/src/selection.rs` | `Selection` | 已落地 |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |
