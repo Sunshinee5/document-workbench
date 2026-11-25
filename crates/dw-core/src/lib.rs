@@ -16,6 +16,7 @@ pub mod driver;
 pub mod editing;
 pub mod error;
 pub mod eventbus;
+pub mod font;
 pub mod hittest;
 pub mod lifecycle;
 pub mod object;

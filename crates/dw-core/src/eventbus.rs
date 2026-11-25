@@ -35,6 +35,25 @@ pub enum EventPayload {
         /// 取消原因。
         reason: EditingCancelReason,
     },
+    /// `FontRewriteStarted`：字体重写开始（`13` §十一）。
+    FontRewriteStarted {
+        /// 被编辑对象。
+        object_id: u64,
+    },
+    /// `FontRewriteFinished`：字体重写成功，产出 `FontPatch`。
+    FontRewriteFinished {
+        /// 被编辑对象。
+        object_id: u64,
+        /// 解析出的字形映射条目数。
+        glyph_count: usize,
+    },
+    /// `FontRewriteFailed`：字体重写失败。
+    FontRewriteFailed {
+        /// 被编辑对象。
+        object_id: u64,
+        /// 中文失败原因。
+        reason: String,
+    },
 }
 
 /// 事件对象：承载事件种类、中文描述与可选结构化载荷。
@@ -118,6 +137,42 @@ impl Event {
             format!("编辑已取消：对象 {}（{}）", object_id.0, reason_text),
         )
         .with_payload(EventPayload::EditingCanceled { object_id, reason })
+    }
+
+    /// `FontRewriteStarted`（`13` §十一）：字体重写开始。
+    pub fn font_rewrite_started(object_id: u64) -> Self {
+        Self::new(
+            "FontRewriteStarted",
+            format!("开始字体重写：对象 {}", object_id),
+        )
+        .with_payload(EventPayload::FontRewriteStarted { object_id })
+    }
+
+    /// `FontRewriteFinished`（`13` §十一）：字体重写成功。
+    pub fn font_rewrite_finished(object_id: u64, glyph_count: usize) -> Self {
+        Self::new(
+            "FontRewriteFinished",
+            format!(
+                "字体重写完成：对象 {}，{} 个字形映射",
+                object_id, glyph_count
+            ),
+        )
+        .with_payload(EventPayload::FontRewriteFinished {
+            object_id,
+            glyph_count,
+        })
+    }
+
+    /// `FontRewriteFailed`（`13` §十一）：字体重写失败。
+    pub fn font_rewrite_failed(object_id: u64, reason: &str) -> Self {
+        Self::new(
+            "FontRewriteFailed",
+            format!("字体重写失败：对象 {}（{}）", object_id, reason),
+        )
+        .with_payload(EventPayload::FontRewriteFailed {
+            object_id,
+            reason: reason.to_string(),
+        })
     }
 
     /// `TaskFinished`：Task 成功结束（`01` §6 冻结的 6 类事件之一）。

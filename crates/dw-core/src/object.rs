@@ -295,7 +295,7 @@ pub enum Color {
 /// 字体资源引用（18-03 §十四 / §十六）：统一表达 `/F1` 之类的资源名。
 ///
 /// 领域层禁止直接保存 lopdf Object；xref 只作为可选定位信息，不参与对象身份。
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 pub struct FontRef {
     /// 资源名字典中的字体名（不含 `/`）；空串表示未指定。
     pub name: String,
@@ -423,7 +423,10 @@ impl ColorValue {
 pub struct TextObject {
     /// 资源字典中的字体标识。
     pub font_id: String,
-    /// 原始字形编码序列。
+    /// 原始字形编码序列（`13` AD-18 / C-1）。
+    ///
+    /// 这是 **Parser 从内容流解析出的只读原始编码**，18-02/18-03 的 Round Trip 依赖它。
+    /// Font Rewrite 产生的 Glyph **禁止写回本字段**，只进 `FontPatch.glyph_mapping`。
     pub glyphs: Vec<u32>,
     /// ToUnicode 映射出来的文本；PDF 无映射时为 `None`。
     pub unicode: Option<String>,

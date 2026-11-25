@@ -259,6 +259,8 @@ pub struct Document {
     pub kind: DocumentKind,
     /// 声明的能力集合（`DocumentStore::create()` 时按格式写入，见 `00` §4.11）。
     pub declared_capabilities: CapabilitySet,
+    /// 字体唯一真值（`13` AD-17）。Engine 只读消费，注册由调用方 / Parser 完成。
+    pub font_registry: crate::font::FontRegistry,
     /// 可变内容：内容修订号 / 状态 / 元数据。
     inner: RwLock<DocumentInner>,
 }
@@ -270,6 +272,7 @@ impl Document {
             id,
             kind,
             declared_capabilities,
+            font_registry: crate::font::FontRegistry::new(),
             inner: RwLock::new(DocumentInner {
                 revision: 0,
                 state: DocumentState::Created,

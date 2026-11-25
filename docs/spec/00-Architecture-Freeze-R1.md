@@ -566,6 +566,7 @@ Cargo Workspace 成员固定：`crates/dw-core`、`crates/dw-runtime`、`crates/
 | Selection（页选择） | `crates/dw-core/src/selection.rs` | `Selection`（`pages` + `anchor`） | 已落地（对象轨道已于 18-05 迁出） |
 | Selection Engine（18-05） | `crates/dw-core/src/selection.rs` / `session.rs` / `eventbus.rs` | `SelectionState` / `SelectionSnapshot` / `SelectionEngine` / `SelectionCommand` / `SelectionChange` / `Session.selection_state` / `EventPayload` | 已落地（18-05） |
 | Editing Engine（18-06） | `crates/dw-core/src/editing.rs` / `diff.rs` / `eventbus.rs` | `EditingEngine` / `EditingSession` / `EditingState` / `EditingOperation` / `EditingError` / `Diff::apply_object` / `Diff::revert_object` | 已落地（18-06） |
+| Font Rewrite Engine（18-07） | `crates/dw-core/src/font.rs` / `document.rs` / `eventbus.rs` | `FontRegistry` / `FontDescriptor` / `FontPatch` / `FontRewriteEngine` / `Document.font_registry` | 已落地（18-07） |
 | Clipboard | `crates/dw-core/src/clipboard.rs` | `Clipboard` | 已落地 |
 | EventBus | `crates/dw-core/src/eventbus.rs` | `EventBus` / `Event` | 已落地 |
 | 错误 | `crates/dw-core/src/error.rs` | `DwError` / `CapabilityNotSupported` / `TaskRejected` / `DriverError` | 已落地 |
