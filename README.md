@@ -29,7 +29,7 @@ Windows 本地绿色版文档工作台。React + TypeScript + Tauri 2 + Rust Car
 | **能力门禁** | 全链路唯一准入点；只检查 `create()` 时声明的 `Capability`，失败对外只抛 `TaskRejected` | `crates/dw-core/src/capability.rs` |
 | **绿色版打包** | `scripts/package.sh` 前端先构建、Rust 后编译，末尾自检 exe 确实内嵌当前前端；产物约 25 MB | `dist/DocumentWorkbench/`（不入库） |
 
-验证状态：**191 个测试全部通过**（`dw-core` + `dw-pdf`；`real_pdf` 组 2 例需 `DW_PDF_SAMPLE` 环境变量，未设置时跳过）；`tools/verify.ps1` 的 fmt / clippy / test / 前端构建全部 PASS，`npx tsc --noEmit` 通过。**Tauri 构建受本机构建链限制**（缺 mingw-w64 的 `as.exe`，`raw-dylib` 导入库无法生成），详见 [文档16 测试报告](docs/records/文档16-UI架构-测试报告.md) 第四节。
+验证状态：**191 个测试全部通过**（`dw-core` + `dw-pdf`；`real_pdf` 组 2 例需 `DW_PDF_SAMPLE` 环境变量，未设置时跳过）；`tools/verify.ps1` 的 fmt / clippy / test / 前端构建全部 PASS，`npx tsc --noEmit` 通过。绿色版打包需把 mingw-w64 binutils 前置到 PATH（`export PATH="/c/mingw64/bin:$PATH"`），详见 [文档16 测试报告](docs/records/文档16-UI架构-测试报告.md) 第四节。
 
 详细实现记录：[Feature-01](docs/records/Feature-01-实现记录.md) · [Feature-02](docs/records/Feature-02-实现记录.md) · [Feature-03](docs/records/Feature-03-实现记录.md)
 
@@ -115,6 +115,10 @@ tools/verify.ps1    一键验收（fmt / clippy / test / npm build / Tauri build
 本机无 MSVC `link.exe`，**所有 Rust 命令必须带 GNU 工具链后缀**；裸 `cargo` 报 EXIT 101 但 `error[E` 计数为 0 属于工具链问题，不是代码问题。
 
 ```bash
+# 本机编译前必须把 mingw-w64 binutils 前置到 PATH（raw-dylib 需要 as.exe / dlltool.exe）
+export PATH="/c/mingw64/bin:$PATH"
+export CARGO_BUILD_JOBS=1     # 本机并发编译会报 os error 5 文件锁
+
 # 检查 / 测试
 cargo +stable-x86_64-pc-windows-gnu test -p dw-core -p dw-pdf
 
