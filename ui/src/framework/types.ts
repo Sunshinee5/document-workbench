@@ -53,6 +53,16 @@ export interface FrameworkContext {
   saveMessage: string;
   /** 18C：最近事件中文描述。 */
   lastEvent: string;
+  /** 第19章：OCR 会话状态文案。 */
+  ocrStateLabel: string;
+  /** 第19章：OCR 进度百分比。 */
+  ocrProgress: number;
+  /** 第19章：OCR 结果数量。 */
+  ocrResultCount: number;
+  /** 第19章：是否有 OCR 引擎可用。 */
+  ocrAvailable: boolean;
+  /** 第19章：首个结果是否已接受且可写回文本对象。 */
+  ocrApplyable: boolean;
 }
 
 /** App 注入的动作集合：注册表只声明意图，不持有 ViewModel / IPC。 */
@@ -80,6 +90,16 @@ export interface FrameworkActions {
   replaceText(text: string): void;
   selectAll(): void;
   clearSelection(): void;
+  /** 第19章：OCR 动作（由 App 注入 OcrController）。 */
+  ocrRecognize(scope: 'full' | 'pages' | 'region'): void;
+  ocrPause(): void;
+  ocrResume(): void;
+  ocrCancel(): void;
+  ocrApply(index: number): void;
+  /** Ctrl+F：OCR 结果内检索（全文 Search 属 21 章）。 */
+  searchInOcr(): void;
+  /** 复制首个 OCR 结果文本（不属对象剪贴板编辑）。 */
+  ocrCopyResult(): void;
 }
 
 /** 能力需求名：Ribbon 按钮启用只由这些命名谓词决定（AD-13）。 */
@@ -94,6 +114,11 @@ export const NEEDS = {
   path: (ctx: FrameworkContext) => ctx.capability.can_edit_path,
   editing: (ctx: FrameworkContext) => ctx.editing.active,
   multiPage: (ctx: FrameworkContext) => ctx.pageCount > 1,
+  ocrAvailable: (ctx: FrameworkContext) => ctx.ocrAvailable,
+  ocrResults: (ctx: FrameworkContext) => ctx.ocrResultCount > 0,
+  ocrApplyable: (ctx: FrameworkContext) => ctx.ocrApplyable,
+  ocrRunning: (ctx: FrameworkContext) => ctx.ocrStateLabel.includes('识别中'),
+  ocrPaused: (ctx: FrameworkContext) => ctx.ocrStateLabel.includes('已暂停'),
 } satisfies Record<string, (ctx: FrameworkContext) => boolean>;
 
 export type NeedName = keyof typeof NEEDS;
@@ -112,7 +137,11 @@ export type CursorKind =
   | 'rotate'
   | 'ocr'
   | 'annotation'
-  | 'ai';
+  | 'ai'
+  /** 第19章：OCR Running 全局忙态。 */
+  | 'busy'
+  /** 第19章：无能力 / 禁用工具的统一禁止态。 */
+  | 'forbidden';
 
 /** 一个可激活工具。未接入能力也注册，只是 enabled=false。 */
 export interface ToolContribution {
@@ -160,6 +189,13 @@ export interface OverlayRenderProps {
   hoverKind?: string;
   /** 18C：Primary 选中对象 id（单独高亮）。 */
   primaryObjectId?: number | null;
+  /** 第19章：OCR 结果投影（Overlay 画 BBox + confidence）。 */
+  ocrResults?: Array<{
+    page: number;
+    bbox: [number, number, number, number];
+    confidence: number;
+    text: string;
+  }>;
 }
 
 /** 对象几何投影（不是 Object 真值）；由对象树 IPC 快照投影得到。 */

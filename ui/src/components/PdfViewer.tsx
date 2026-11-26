@@ -49,6 +49,13 @@ export interface PageOverlayData {
   pageHeight: number;
   /** 本页参与高亮的对象。 */
   objects: OverlayObject[];
+  /** 第19章：本页 OCR 结果投影（Overlay BBox + confidence）。 */
+  ocrResults?: Array<{
+    page: number;
+    bbox: [number, number, number, number];
+    confidence: number;
+    text: string;
+  }>;
 }
 
 /** Viewer 属性：所有状态由外部（ViewModel）传入，Viewer 不持有真值。 */
@@ -543,6 +550,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               hoverKind={hoverKind}
               hoverPriority={hoverPriority}
               primaryObjectId={primaryObjectId}
+              ocrResults={overlayPages?.[box.original]?.ocrResults ?? []}
             />
           </div>
         ))}

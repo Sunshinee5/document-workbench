@@ -152,6 +152,11 @@ export class EditorController {
     }
   }
 
+  /** 消费命令返回的快照（如 OCR Apply）：不重复拉取，也不另存业务真值。 */
+  applySnapshot(snapshot: EditorSnapshot): void {
+    this.update(applySnapshot(this.stateValue, snapshot));
+  }
+
   /** 命中测试；返回 null 表示未命中。 */
   async hitTest(
     page: number,

@@ -23,6 +23,15 @@
   /* 纸张：PDF 页面永远是白纸，深色主题下也不跟着变暗。 */
   --dw-paper: #ffffff;
 
+  /* 第19章：统一的 Motion / OCR / HiDPI Token（规范 20 §五）。 */
+  --dw-motion-fast: 120ms;
+  --dw-motion-normal: 220ms;
+  --dw-motion-ease: ease;
+  --dw-ocr-high: #039855;
+  --dw-ocr-mid: #dc6803;
+  --dw-ocr-low: #d92d20;
+  --dw-ui-scale: 1;
+
   --dw-font: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --dw-font-mono: "Cascadia Code", "Consolas", monospace;
   --dw-radius: 6px;
@@ -57,5 +66,8 @@
   --dw-hover: rgba(91, 141, 255, 0.16);
   --dw-caret: #5b8dff;
   --dw-paper: #ffffff;
+  --dw-ocr-high: #56c48a;
+  --dw-ocr-mid: #f2a455;
+  --dw-ocr-low: #f97066;
   --dw-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
 }

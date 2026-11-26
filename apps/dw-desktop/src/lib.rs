@@ -65,7 +65,17 @@ pub fn run() {
             ipc::editor_inspector,
             // 19 章（18C）：只读事件游标与运行态投影
             ipc::core_events,
-            ipc::core_status
+            ipc::core_status,
+            // 第19章：OCR Workspace
+            ipc::ocr_providers,
+            ipc::ocr_status,
+            ipc::ocr_start,
+            ipc::ocr_pause,
+            ipc::ocr_resume,
+            ipc::ocr_cancel,
+            ipc::ocr_decide,
+            ipc::ocr_apply,
+            ipc::ocr_clear_cache
         ])
         .run(tauri::generate_context!())
         .expect("文档工作台启动失败");

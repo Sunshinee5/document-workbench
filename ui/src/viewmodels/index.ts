@@ -27,6 +27,7 @@ import {
   getObjectTree,
   type AppInfo,
   type DocumentInfo,
+  type EditorSnapshot,
   type ObjectTreeInfo,
   type PageLayoutInfo,
   type SelectionMode,
@@ -615,6 +616,20 @@ export class WorkbenchViewModel {
         objectTreeError: messageOf(error),
       });
     }
+  }
+
+  /**
+   * 消费 EditorSnapshot 中与工作台壳层相关的投影（脏标记 / 历史游标 / 页码）。
+   *
+   * 快照来自 Editing Engine 的命令返回，不是前端第二份真值；这里只刷新展示。
+   */
+  applyEditorSnapshot(snapshot: EditorSnapshot): void {
+    this.update({
+      dirty: snapshot.dirty,
+      canUndo: snapshot.can_undo,
+      canRedo: snapshot.can_redo,
+      currentPage: snapshot.page,
+    });
   }
 
   /** 清空错误提示。 */

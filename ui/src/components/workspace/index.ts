@@ -9,6 +9,6 @@ export {
   AnnotationPanel,
   AttachmentsPanel,
   BookmarksPanel,
-  OcrPanel,
   OutlinePanel,
 } from './panels/PlaceholderPanels';
+export { OcrWorkspace, type OcrWorkspaceProps } from './panels/OcrWorkspace';

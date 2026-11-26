@@ -1,78 +1,77 @@
-//! OCR Driver 骨架：只做四件事（调第三方 / 转数据 / 统一错误 / 能力检测），当前全部空实现。
-//! 第三方占位：Windows OCR（MVP 优先）、Tesseract（MVP 可选）、PaddleOCR（后续插件）。
+//! OCR 引擎与 Workspace 核心（规范 20 / 第19章）。
+//!
+//! 职责边界（AD-02~04）：
+//! - OCR 属 Workspace，不修改 Editing Engine / Parser / Save。
+//! - Provider 只产出 OCRResult；Apply 由上层经 Editing Engine 完成。
+//! - 真实 OCR 引擎未安装时如实报不可用，不假装识别。
 
-use dw_core::capability::CapabilitySet;
+pub mod provider;
+pub mod session;
+pub mod types;
+
+use dw_core::capability::{Capability, CapabilitySet};
 use dw_core::context::ExecutionContext;
 use dw_core::driver::IDriver;
 use dw_core::error::DwError;
 use dw_core::lifecycle::{HealthStatus, IExecutable, IHealthCheck};
 
-/// OCR 驱动骨架：实现 Driver 四项职责，函数体全部为空。
+/// OCR Driver：表明本驱动提供 `Capability::Ocr`。
+///
+/// 识别能力由 `provider::OCRProvider` 提供；Driver 本身只做健康检查与能力声明，
+/// 不解析 PDF、不写文档（AD-02/04）。
 #[derive(Debug, Clone, Default)]
 pub struct OcrDriver {}
 
 impl IExecutable for OcrDriver {
-    /// 初始化（空实现）。
     fn initialize(&mut self) -> Result<(), DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        // 无外部资源：初始化恒成功，真实引擎由 Provider 自己管理。
+        Ok(())
     }
 
-    /// 执行（空实现），OCR 快速 / 高精度模式属于 Task 参数，不是独立层。
     fn execute(&self, _context: &ExecutionContext) -> Result<(), DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        // OCR 经独立 Workspace 命令执行，不走通用 Task 链（AD-02）。
+        Ok(())
     }
 
-    /// 取消（空实现）。
     fn cancel(&mut self) -> Result<(), DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        Ok(())
     }
 
-    /// 释放（空实现）。
     fn dispose(&mut self) -> Result<(), DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        Ok(())
     }
 }
 
 impl IHealthCheck for OcrDriver {
-    /// 健康检查（空实现）。
     fn health(&self) -> Result<HealthStatus, DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        // 无真实引擎：降级可用（TextLayerProvider 仍可工作）。
+        Ok(HealthStatus::Degraded)
     }
 
-    /// 版本查询（空实现）。
     fn version(&self) -> Result<String, DwError> {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        Ok("dw-ocr R1（Provider 抽象 / TextLayer 可用）".to_string())
     }
 }
 
 impl IDriver for OcrDriver {
-    /// 驱动名称（空实现）。
     fn name(&self) -> &str {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        "ocr"
     }
 
-    /// 声明能力（空实现）。
     fn capabilities(&self) -> CapabilitySet {
-        // TODO(Stage 4)：Windows OCR 优先
-        todo!()
+        let mut set = CapabilitySet::new();
+        set.insert(Capability::Ocr);
+        set
     }
 }
 
-/// Windows OCR 适配器占位（MVP 优先）。
-#[derive(Debug, Clone, Default)]
-pub struct WindowsOcrAdapter {}
+/// Windows OCR 适配器别名（历史名称，统一由 `provider::ImageOcrAdapter` 实现）。
+pub type WindowsOcrAdapter = provider::ImageOcrAdapter;
+/// Tesseract 适配器别名。
+pub type TesseractAdapter = provider::ImageOcrAdapter;
+/// PaddleOCR 适配器别名。
+pub type PaddleOcrAdapter = provider::ImageOcrAdapter;
 
-/// Tesseract 适配器占位（MVP 可选）。
-#[derive(Debug, Clone, Default)]
-pub struct TesseractAdapter {}
-
-/// PaddleOCR 适配器占位（后续插件，注册 Capability 而非注册菜单）。
-#[derive(Debug, Clone, Default)]
-pub struct PaddleOcrAdapter {}
+pub use provider::{OCRProvider, OCRProviderRegistry, OcrPageInput, TextLayerProvider};
+pub use session::{OCRCache, OCRPipeline, OCRSession};
+pub use types::{OCRResult, OCRReview, OCRSessionState, OCRTask};

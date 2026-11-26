@@ -401,6 +401,20 @@
   cursor: grab;
 }
 
+/* 第19章：Busy / Forbidden 与工具光标共用 data-cursor 唯一出口。 */
+.pdf-viewer[data-cursor='arrow'],
+.pdf-viewer[data-cursor='default'] {
+  cursor: default;
+}
+
+.pdf-viewer[data-cursor='busy'] {
+  cursor: progress;
+}
+
+.pdf-viewer[data-cursor='forbidden'] {
+  cursor: not-allowed;
+}
+
 /* 右键菜单（18B ContextMenu Framework）。 */
 .dw-context-menu {
   position: fixed;
@@ -698,4 +712,119 @@
   color: var(--dw-text);
   font-size: 11px;
   cursor: pointer;
+}
+
+/* ---- 第19章 Desktop Polish：统一反馈组件（规范 20 §五） ---- */
+
+.dw-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0;
+}
+
+.dw-progress-label {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+.dw-progress-track {
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--dw-surface-3);
+}
+
+.dw-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: var(--dw-accent);
+  transition: width var(--dw-motion-normal) var(--dw-motion-ease);
+}
+
+.dw-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 4px 0;
+}
+
+.dw-skeleton-row {
+  height: 10px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, var(--dw-surface-2), var(--dw-surface-3), var(--dw-surface-2));
+  background-size: 200% 100%;
+  animation: dw-skeleton-shimmer 1.2s linear infinite;
+}
+
+@keyframes dw-skeleton-shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+.dw-error-panel {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0;
+  padding: 6px 8px;
+  border: 1px solid var(--dw-danger);
+  border-radius: var(--dw-radius);
+  background: var(--dw-danger-soft);
+  color: var(--dw-danger);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.dw-error-icon {
+  flex: 0 0 auto;
+}
+
+.dw-error-retry {
+  margin-left: auto;
+  padding: 1px 8px;
+  border: 1px solid var(--dw-danger);
+  border-radius: 3px;
+  background: var(--dw-surface);
+  color: var(--dw-danger);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.dw-tooltip {
+  display: inline-flex;
+  max-width: 100%;
+}
+
+.dw-tooltip.is-disabled {
+  opacity: 0.62;
+}
+
+/* ---- OCR Overlay：复用 OverlayRegistry 的 ocr 层，不另建画布 ---- */
+
+.dw-ocr-box {
+  position: absolute;
+  border: 1.5px solid var(--dw-ocr-high);
+  border-radius: 2px;
+  background: var(--dw-accent-soft);
+  background: color-mix(in srgb, var(--dw-accent-soft) 50%, transparent);
+  animation: dw-ocr-appear var(--dw-motion-fast) var(--dw-motion-ease);
+}
+
+.dw-ocr-box-tag {
+  position: absolute;
+  top: -16px;
+  left: 0;
+  padding: 0 4px;
+  border-radius: 3px;
+  background: var(--dw-surface-3);
+  color: var(--dw-text);
+  font-size: 10px;
+  line-height: 15px;
+  white-space: nowrap;
+}
+
+@keyframes dw-ocr-appear {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
 }

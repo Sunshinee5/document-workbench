@@ -15,6 +15,7 @@ dw-core = { path = "../../crates/dw-core" }
 dw-log = { path = "../../crates/dw-log" }
 dw-runtime = { path = "../../crates/dw-runtime" }
 dw-pdf = { path = "../../crates/dw-pdf" }
+dw-ocr = { path = "../../crates/dw-ocr" }
 tauri-plugin-dialog = "2"
 
 # 发布构建必须开启：tauri 的 build.rs 以 `!custom-protocol` 判定 dev，

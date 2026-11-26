@@ -5,7 +5,7 @@
 
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use dw_core::action::UserAction;
 use dw_core::capability::{Capability, CapabilitySet, HasCapability};
@@ -17,11 +17,15 @@ use dw_core::context::{CancelToken, Config, ExecutionContext, Progress};
 use dw_core::document::{Document, DocumentId, DocumentKind, DocumentSaveState};
 use dw_core::driver::{DriverManager, SaveOutcome};
 use dw_core::eventbus::{Event, EventBus};
+use dw_ocr::provider::OCRProviderRegistry;
+use dw_ocr::session::{OCRCache, OCRSession};
+use dw_ocr::types::OCRSessionState;
 use dw_core::lifecycle::IExecutable;
 use dw_core::recovery::RecoveryStore;
 use dw_core::session::{CommandRecord, SavePoint, Session, SessionManager, SessionState};
 use dw_core::task::TaskManager;
 use serde::Serialize;
+use tauri::Manager;
 
 /// 应用组装层：持有三个唯一 Manager 与唯一 EventBus，随应用启动创建、随应用退出释放。
 /// 它不是架构层、不是 Manager，只是把横切组件组装起来交给 Tauri State 托管。
@@ -36,6 +40,31 @@ pub struct CoreState {
     pub event_bus: Mutex<EventBus>,
     /// 对象编辑桥（`17` 章）：驱动侧编排缓存，不是第 4 个 Store。
     pub editor: Mutex<dw_pdf::editing_service::ObjectEditingService>,
+    /// OCR 工作区运行态（第19章）：组装层服务，不是 Core 的第 4 个 Store。
+    pub ocr: Mutex<OcrRuntime>,
+}
+
+/// OCR 组装层运行态：会话 / 缓存 / Provider 注册表。
+pub struct OcrRuntime {
+    /// 当前 OCR 会话（无会话为 None）。
+    pub session: Option<OCRSession>,
+    /// 结果缓存（避免重复识别）。
+    pub cache: OCRCache,
+    /// Provider 注册表（Local / Cloud 可扩展）。
+    pub providers: OCRProviderRegistry,
+    /// 会话 id 分配器。
+    pub next_session_id: u64,
+}
+
+impl Default for OcrRuntime {
+    fn default() -> Self {
+        Self {
+            session: None,
+            cache: OCRCache::new(),
+            providers: OCRProviderRegistry::with_defaults(),
+            next_session_id: 1,
+        }
+    }
 }
 
 impl CoreState {
@@ -73,6 +102,7 @@ impl CoreState {
             driver_manager: Mutex::new(drivers),
             event_bus: Mutex::new(events),
             editor: Mutex::new(dw_pdf::editing_service::ObjectEditingService::new()),
+            ocr: Mutex::new(OcrRuntime::default()),
         }
     }
 }
@@ -1816,4 +1846,461 @@ pub fn core_status(state: tauri::State<'_, CoreState>) -> CoreStatus {
         save_incremental,
         event_count: events.events().len() as u64,
     }
+}
+
+// ---------------------------------------------------------------------------
+// 第19章：OCR Workspace（规范 20）。
+// OCR 只产出结果并读取对象树文本层；Apply 经 Editing Engine，不改 Parser / Save。
+// ---------------------------------------------------------------------------
+
+/// OCR Provider 摘要（Local / Cloud 可扩展）。
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrProviderView {
+    /// Provider 名称。
+    pub name: String,
+    /// 是否可用（未安装引擎为 false）。
+    pub available: bool,
+}
+
+/// OCR 结果投影：五字段 + 源对象 id（供 Apply 映射）。
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrResultView {
+    pub page: u32,
+    pub bbox: [f64; 4],
+    pub confidence: f64,
+    pub language: String,
+    pub text: String,
+    pub rotation: i32,
+    pub provider: String,
+    /// 源文本对象 id；None 表示图像 OCR 结果（当前不可 Apply）。
+    pub source_object_id: Option<u64>,
+}
+
+/// OCR Review 投影。
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrReviewView {
+    pub result_index: usize,
+    pub original: String,
+    pub ocr_text: String,
+    pub diff: String,
+    pub decision: String,
+}
+
+/// OCR Session 投影（StatusBar / Workspace 数据源）。
+#[derive(Debug, Clone, Serialize)]
+pub struct OcrSessionView {
+    pub session_id: u64,
+    pub state: String,
+    pub state_label: String,
+    pub progress: u32,
+    pub completed_pages: usize,
+    pub total_pages: usize,
+    pub error: String,
+    pub results: Vec<OcrResultView>,
+    pub reviews: Vec<OcrReviewView>,
+}
+
+impl OcrSessionView {
+    /// 由运行态会话投影（纯值拷贝，不写真值）。
+    fn from_session(session: &OCRSession) -> Self {
+        Self {
+            session_id: session.id,
+            state: format!("{:?}", session.state),
+            state_label: session.state.label().to_string(),
+            progress: session.progress_percent(),
+            completed_pages: session.completed_pages,
+            total_pages: session.total_pages,
+            error: session.error.clone(),
+            results: session
+                .history
+                .results
+                .iter()
+                .map(|item| OcrResultView {
+                    page: item.page,
+                    bbox: item.bbox,
+                    confidence: item.confidence,
+                    language: item.language.clone(),
+                    text: item.text.clone(),
+                    rotation: item.rotation,
+                    provider: item.provider.clone(),
+                    source_object_id: item.source_object_id,
+                })
+                .collect(),
+            reviews: session
+                .history
+                .reviews
+                .iter()
+                .map(|item| OcrReviewView {
+                    result_index: item.result_index,
+                    original: item.original.clone(),
+                    ocr_text: item.ocr_text.clone(),
+                    diff: item.diff.clone(),
+                    decision: item.decision.label().to_string(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// 空会话投影：无 OCR 会话时 UI 显示 Idle。
+fn empty_ocr_view() -> OcrSessionView {
+    OcrSessionView {
+        session_id: 0,
+        state: "Idle".to_string(),
+        state_label: OCRSessionState::Idle.label().to_string(),
+        progress: 0,
+        completed_pages: 0,
+        total_pages: 0,
+        error: String::new(),
+        results: Vec::new(),
+        reviews: Vec::new(),
+    }
+}
+
+/// 列出 OCR Provider 及可用性（引擎未安装如实 false）。
+#[tauri::command]
+pub fn ocr_providers(state: tauri::State<'_, CoreState>) -> Vec<OcrProviderView> {
+    let runtime = lock(&state.ocr);
+    runtime
+        .providers
+        .list()
+        .into_iter()
+        .map(|(name, available)| OcrProviderView { name, available })
+        .collect()
+}
+
+/// 当前 OCR 会话投影（只读）。
+#[tauri::command]
+pub fn ocr_status(state: tauri::State<'_, CoreState>) -> OcrSessionView {
+    let runtime = lock(&state.ocr);
+    runtime
+        .session
+        .as_ref()
+        .map(OcrSessionView::from_session)
+        .unwrap_or_else(empty_ocr_view)
+}
+
+/// 启动 OCR：全文 / 指定页 / 指定区域。
+///
+/// 输入来自对象树文本层投影（不新增 Parser），Provider 只产出 OCRResult。
+#[tauri::command]
+pub fn ocr_start(
+    document_id: u64,
+    pages: Vec<u32>,
+    region: Option<[f64; 4]>,
+    provider_name: Option<String>,
+    state: tauri::State<'_, CoreState>,
+    app: tauri::AppHandle,
+) -> Result<OcrSessionView, String> {
+    // 段1（只读）：解析对象树投影为文本层输入，不写入任何状态。
+    let manager = lock(&state.session_manager);
+    let session = manager
+        .active()
+        .ok_or_else(|| "OCR 启动失败：没有活动会话".to_string())?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "OCR 启动失败：文档不存在".to_string())?;
+    let tree = dw_pdf::object_tree_view::project_object_tree(document_id, document)
+        .map_err(|error| format!("OCR 读取文本层失败：{}", error.message))?;
+    drop(manager);
+
+    // 段2（Provider）：选定引擎并校验可用性，未安装则明确报错。
+    let provider_name = provider_name.unwrap_or_else(|| "text-layer".to_string());
+    {
+        let runtime = lock(&state.ocr);
+        let provider = runtime
+            .providers
+            .get(&provider_name)
+            .ok_or_else(|| format!("OCR Provider 不存在：{}", provider_name))?;
+        if !provider.is_available() {
+            return Err(format!("OCR Provider 不可用：{}（引擎未安装）", provider_name));
+        }
+    }
+    let task = dw_ocr::types::OCRTask {
+        document_id,
+        pages: pages.clone(),
+        region,
+        language: String::new(),
+    };
+
+    // 段3（会话）：立即发布 Running 快照；Cache 临时移出 runtime 供后台线程使用。
+    let (session_id, cache) = {
+        let mut runtime = lock(&state.ocr);
+        let session_id = runtime.next_session_id;
+        runtime.next_session_id += 1;
+        let cache = std::mem::take(&mut runtime.cache);
+        (session_id, cache)
+    };
+    let mut ocr = OCRSession::new(session_id, task.clone());
+    ocr.transition(OCRSessionState::Running)
+        .map_err(|error| error.to_string())?;
+    let target_pages: Vec<u32> = if pages.is_empty() {
+        tree.pages.iter().map(|page| page.page).collect()
+    } else {
+        pages.clone()
+    };
+    ocr.total_pages = target_pages.len().max(1);
+    let initial = {
+        let mut runtime = lock(&state.ocr);
+        runtime.session = Some(ocr);
+        OcrSessionView::from_session(runtime.session.as_ref().unwrap())
+    };
+
+    // 段4（Pipeline）：后台线程分页执行。每页前后只短持锁，暂停/继续/取消由 IPC 改 Session。
+    std::thread::spawn(move || {
+        let core = app.state::<CoreState>();
+        let mut cache = cache;
+        let mut originals: Vec<String> = Vec::new();
+        for page in &target_pages {
+            loop {
+                let current = {
+                    let runtime = lock(&core.ocr);
+                    runtime.session.as_ref().map(|item| item.state)
+                };
+                match current {
+                    Some(OCRSessionState::Running) => break,
+                    Some(OCRSessionState::Paused) => {
+                        std::thread::sleep(Duration::from_millis(20));
+                        continue;
+                    }
+                    Some(_) => {
+                        let mut runtime = lock(&core.ocr);
+                        runtime.cache = cache;
+                        return;
+                    }
+                    None => {
+                        let mut runtime = lock(&core.ocr);
+                        runtime.cache = cache;
+                        return;
+                    }
+                }
+            }
+
+            let Some(page_info) = tree.pages.iter().find(|item| item.page == *page) else {
+                continue;
+            };
+            let lines = page_info
+                .objects
+                .iter()
+                .filter(|object| object.kind == "Text")
+                .filter_map(|object| {
+                    object
+                        .unicode
+                        .as_ref()
+                        .map(|text| (object.bbox, text.clone(), Some(object.object_id)))
+                })
+                .collect();
+            let input = dw_ocr::provider::OcrPageInput {
+                page: *page,
+                page_width: page_info.page_width,
+                page_height: page_info.page_height,
+                text_lines: lines,
+                image_bytes: Vec::new(),
+            };
+            let cache_key = dw_ocr::types::OcrCacheKey::new(
+                document_id,
+                *page,
+                &provider_name,
+                task.region,
+            );
+            let page_results = if let Some(cached) = cache.get(&cache_key) {
+                cached.clone()
+            } else {
+                let recognized = {
+                    let runtime = lock(&core.ocr);
+                    let result = runtime
+                        .providers
+                        .get(&provider_name)
+                        .map(|provider| provider.recognize(&task, std::slice::from_ref(&input)));
+                    drop(runtime);
+                    result
+                };
+                let Some(recognized) = recognized else {
+                    let mut runtime = lock(&core.ocr);
+                    runtime.cache = cache;
+                    return;
+                };
+                match recognized {
+                    Ok(mut results) => {
+                        results.retain(|item| !item.text.trim().is_empty());
+                        cache.put(cache_key, results.clone());
+                        results
+                    }
+                    Err(error) => {
+                        let mut runtime = lock(&core.ocr);
+                        if let Some(session) = runtime.session.as_mut() {
+                            session.error = error;
+                            let _ = session.transition(OCRSessionState::Failed);
+                        }
+                        runtime.cache = cache;
+                        return;
+                    }
+                }
+            };
+            originals.extend(page_results.iter().map(|result| result.text.clone()));
+            {
+                let mut runtime = lock(&core.ocr);
+                if let Some(session) = runtime.session.as_mut() {
+                    session.append_results(page_results);
+                    session.completed_pages += 1;
+                }
+            }
+        }
+
+        let mut runtime = lock(&core.ocr);
+        runtime.cache = cache;
+        if let Some(session) = runtime.session.as_mut() {
+            if session.state == OCRSessionState::Running {
+                session.build_reviews(&originals);
+                let _ = session.transition(OCRSessionState::Completed);
+            }
+        }
+    });
+
+    Ok(initial)
+}
+
+/// OCR 暂停：Running → Paused。
+#[tauri::command]
+pub fn ocr_pause(state: tauri::State<'_, CoreState>) -> Result<OcrSessionView, String> {
+    let mut runtime = lock(&state.ocr);
+    let session = runtime.session.as_mut().ok_or_else(|| "没有 OCR 会话".to_string())?;
+    session.pause().map_err(|error| error.to_string())?;
+    Ok(OcrSessionView::from_session(session))
+}
+
+/// OCR 继续：Paused → Running。
+#[tauri::command]
+pub fn ocr_resume(state: tauri::State<'_, CoreState>) -> Result<OcrSessionView, String> {
+    let mut runtime = lock(&state.ocr);
+    let session = runtime.session.as_mut().ok_or_else(|| "没有 OCR 会话".to_string())?;
+    session.resume().map_err(|error| error.to_string())?;
+    Ok(OcrSessionView::from_session(session))
+}
+
+/// OCR 取消：Running / Paused → Cancelled。
+#[tauri::command]
+pub fn ocr_cancel(state: tauri::State<'_, CoreState>) -> Result<OcrSessionView, String> {
+    let mut runtime = lock(&state.ocr);
+    let session = runtime.session.as_mut().ok_or_else(|| "没有 OCR 会话".to_string())?;
+    session.cancel().map_err(|error| error.to_string())?;
+    Ok(OcrSessionView::from_session(session))
+}
+
+/// OCR 审核决定：accept / reject。
+#[tauri::command]
+pub fn ocr_decide(
+    index: usize,
+    accept: bool,
+    state: tauri::State<'_, CoreState>,
+) -> Result<OcrSessionView, String> {
+    let mut runtime = lock(&state.ocr);
+    let session = runtime.session.as_mut().ok_or_else(|| "没有 OCR 会话".to_string())?;
+    session.decide(index, accept)?;
+    Ok(OcrSessionView::from_session(session))
+}
+
+/// OCR Apply：把接受的结果经 Editing Engine 写回（AD-03）。
+///
+/// 只对有 source_object_id 的文本结果生效；图像 OCR 结果只展示不 Apply（C-5）。
+#[tauri::command]
+pub fn ocr_apply(
+    result_index: usize,
+    state: tauri::State<'_, CoreState>,
+) -> Result<CommitInfo, String> {
+    // 段1（只读）：取出结果的源对象与新文本，随即释放 OCR 锁。
+    let (object_id, text) = {
+        let runtime = lock(&state.ocr);
+        let session = runtime.session.as_ref().ok_or_else(|| "没有 OCR 会话".to_string())?;
+        let result = session
+            .history
+            .results
+            .get(result_index)
+            .ok_or_else(|| format!("OCR 结果不存在：#{}", result_index))?;
+        let review = session
+            .history
+            .reviews
+            .get(result_index)
+            .ok_or_else(|| "请先生成 Review".to_string())?;
+        if review.decision != dw_ocr::types::ReviewDecision::Accept {
+            return Err("该结果未被接受，不能 Apply".to_string());
+        }
+        let object_id = result
+            .source_object_id
+            .ok_or_else(|| "图像 OCR 结果不能直接写回对象（需先映射到文本对象）".to_string())?;
+        (object_id, result.text.clone())
+    };
+    // 文档 id 从活动会话取（对象 id 全局唯一，页信息不参与定位）。
+    let document_id = {
+        let manager = lock(&state.session_manager);
+        let session = manager.active().ok_or_else(|| "Apply 失败：没有活动会话".to_string())?;
+        session
+            .workspace
+            .view_state()
+            .active_document_id
+            .map(|id| id.0)
+            .ok_or_else(|| "Apply 失败：没有活动文档".to_string())?
+    };
+
+    // 段2（写）：走与 editor_begin_edit / editor_commit 相同的 Editing Engine 链。
+    let mut manager = lock(&state.session_manager);
+    let session = manager
+        .active_mut()
+        .ok_or_else(|| "Apply 失败：没有活动会话".to_string())?;
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "Apply 失败：文档不存在".to_string())?;
+    let mut events = lock(&state.event_bus);
+    let mut editor = lock(&state.editor);
+    editor
+        .begin_edit(session, document, &mut events, object_id, text.clone())
+        .map_err(|error| error.message)?;
+    let commit = editor
+        .commit(session, document, &mut events, Some(text))
+        .map_err(|error| error.message)?;
+
+    // History：与 18 章编辑同一条 History，command_type = EditObject。
+    let command_id = session.history.next_command_id();
+    let refs = persist_diffs(vec![commit.diff.clone()], command_id);
+    session.history.record(CommandRecord {
+        command_id,
+        command_type: CommandKind::EditObject,
+        params: serde_json::json!({
+            "document_id": document_id,
+            "page": commit.object.page_id.raw(),
+            "object_id": commit.object.object_id.0,
+            "source": "ocr",
+        }),
+        diff_reference: refs,
+        timestamp: now_millis(),
+        version: 1,
+    });
+    let document = session
+        .documents
+        .get(DocumentId(document_id))
+        .ok_or_else(|| "Apply 失败：文档不存在".to_string())?;
+    let operators = document
+        .content_patches()
+        .into_iter()
+        .find(|patch| patch.page_id == commit.object.page_id)
+        .map(|patch| patch.operators.len())
+        .unwrap_or(0);
+    Ok(CommitInfo {
+        object_id: commit.object.object_id.0,
+        page: commit.object.page_id.raw(),
+        before_version: commit.before_version,
+        after_version: commit.after_version,
+        operators,
+        snapshot: editor_snapshot_of(&editor, session, document),
+    })
+}
+
+/// 清空 OCR 缓存（避免陈旧结果）。
+#[tauri::command]
+pub fn ocr_clear_cache(state: tauri::State<'_, CoreState>) -> usize {
+    let mut runtime = lock(&state.ocr);
+    runtime.cache.clear();
+    0
 }

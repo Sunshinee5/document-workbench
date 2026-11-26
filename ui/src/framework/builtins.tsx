@@ -145,6 +145,31 @@ function renderEditingOverlay(props: OverlayRenderProps) {
   return props.editingObjectId !== null ? <InlineTextEditor props={props} /> : null;
 }
 
+/** OCR Overlay（第19章）：结果 BBox + confidence 着色，只读不拦截鼠标。 */
+function renderOcrOverlay(props: OverlayRenderProps) {
+  // App 按页投影，只传当前页结果；这里直接画，不按页再过滤。
+  const visible = props.ocrResults ?? [];
+  return visible.map((result, index) => {
+    const box = projectBox(result.bbox, props.pageWidth, props.pageHeight, props.rotation);
+    return (
+      <div
+        key={`ocr-${result.page}-${index}`}
+        className="dw-ocr-box"
+        title={`${result.text} · ${Math.round(result.confidence * 100)}%`}
+        style={{
+          left: `${box.left}%`,
+          top: `${box.top}%`,
+          width: `${box.width}%`,
+          height: `${box.height}%`,
+          borderColor: `var(--dw-ocr-${result.confidence >= 0.8 ? 'high' : result.confidence >= 0.5 ? 'mid' : 'low'})`,
+        }}
+      >
+        <span className="dw-ocr-box-tag">{Math.round(result.confidence * 100)}%</span>
+      </div>
+    );
+  });
+}
+
 /** Inspector 文本分区（18A 行为：字段只读，Unicode 可编辑提交）。 */
 function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: InspectorRenderProps) {
   const text = inspector?.text ?? null;
@@ -307,7 +332,11 @@ export const builtinFeature: DesktopFeature = {
       id: 'edit', label: '编辑', icon: 'editText', order: 30, cursor: 'ibeam',
       enabled: (ctx) => ctx.capability.can_edit_text, reason: '先选中一个文本对象',
     },
-    { id: 'ocr', label: 'OCR', icon: 'ocr', order: 40, cursor: 'ocr', enabled: () => false, reason: 'OCR 由 19 章接入' },
+    {
+      id: 'ocr', label: 'OCR', icon: 'ocr', order: 40, cursor: 'ocr',
+      enabled: (ctx) => ctx.hasDocument && ctx.ocrAvailable,
+      reason: '先打开文档并确认 OCR 引擎可用',
+    },
     { id: 'annotation', label: '批注', icon: 'annotation', order: 50, cursor: 'annotation', enabled: () => false, reason: '批注由 20 章接入' },
     { id: 'ai', label: 'AI', icon: 'ai', order: 60, cursor: 'ai', enabled: () => false, reason: 'AI 由 21 章接入' },
   ],
@@ -335,6 +364,7 @@ export const builtinFeature: DesktopFeature = {
   overlays: [
     { id: 'selection.boxes', layer: 'selection', order: 10, render: renderSelectionOverlay },
     { id: 'editing.inline', layer: 'editing', order: 10, render: renderEditingOverlay },
+    { id: 'ocr.results', layer: 'ocr', order: 10, render: renderOcrOverlay },
   ],
 
   // ---- Inspector Framework：分区由注册表渲染 ----
@@ -393,6 +423,21 @@ export const builtinFeature: DesktopFeature = {
         </PropertySection>
       ),
     },
+    {
+      id: 'ocr', title: 'OCR', order: 50, matches: (ctx) => ctx.ocrResultCount > 0, render: ({ ctx }) => (
+        <PropertySection title="OCR">
+          <PropertyGrid
+            rows={[
+              { label: '会话状态', value: ctx.ocrStateLabel },
+              { label: '进度', value: `${ctx.ocrProgress}%`, mono: true },
+              { label: '结果数', value: `${ctx.ocrResultCount} 条`, mono: true },
+              { label: '引擎', value: ctx.ocrAvailable ? '可用' : '未安装', muted: !ctx.ocrAvailable },
+              { label: '写回方式', value: 'Editing Engine', muted: true },
+            ]}
+          />
+        </PropertySection>
+      ),
+    },
   ],
 
   // ---- Ribbon Framework：页签 / 分组 / 命令全部注册；needs 驱动启停 ----
@@ -412,7 +457,7 @@ export const builtinFeature: DesktopFeature = {
     { id: 'edit.object', tab: 'edit', label: '对象', order: 20 },
     { id: 'edit.page', tab: 'edit', label: '页面', order: 30 },
     { id: 'edit.recognize', tab: 'edit', label: '识别', order: 40 },
-    { id: 'ocr.main', tab: 'ocr', label: 'OCR（19 章）', order: 10 },
+    { id: 'ocr.main', tab: 'ocr', label: 'OCR', order: 10 },
     { id: 'annotation.main', tab: 'annotation', label: '批注（20 章）', order: 10 },
     { id: 'ai.main', tab: 'ai', label: 'AI（21 章）', order: 10 },
     { id: 'view.zoom', tab: 'view', label: '缩放', order: 10 },
@@ -435,18 +480,34 @@ export const builtinFeature: DesktopFeature = {
       needs: ['document', 'text'], active: (ctx) => ctx.mode === 'edit',
       reason: '先选中一个文本对象', run: (a) => a.setMode('edit'),
     },
+    {
+      id: 'mode.ocr', tab: 'edit', group: 'edit.mode', label: 'OCR', icon: 'ocr', order: 40,
+      needs: ['document', 'ocrAvailable'], active: (ctx) => ctx.mode === 'ocr',
+      reason: '先打开文档并确认 OCR 引擎可用', run: (a) => a.setMode('ocr'),
+    },
     { id: 'image.replace', tab: 'edit', group: 'edit.object', label: '替换图片', icon: 'image', order: 10, needs: ['image'], reason: '替换图片属 18-07 图片编辑，IPC 未接入', run: () => undefined },
     { id: 'crop', tab: 'edit', group: 'edit.object', label: '裁剪', icon: 'crop', order: 20, needs: [], reason: '裁剪属页面编辑扩展，尚未接入', run: () => undefined },
     { id: 'path.edit', tab: 'edit', group: 'edit.object', label: '路径', icon: 'path', order: 30, needs: ['path'], reason: '先选中一个路径对象', run: () => undefined },
+    {
+      id: 'deleteObject', tab: 'edit', group: 'edit.object', label: '删除对象', icon: 'delete', order: 40,
+      needs: [], reason: '对象删除由 18A C-9 排除，本章不实现', run: () => undefined,
+    },
     { id: 'rotateLeft', tab: 'edit', group: 'edit.page', label: '左转', icon: 'rotateLeft', order: 10, needs: ['document'], run: (a) => a.rotate(-90) },
     { id: 'rotateRight', tab: 'edit', group: 'edit.page', label: '右转', icon: 'rotateRight', order: 20, needs: ['document'], run: (a) => a.rotate(90) },
     { id: 'deletePages', tab: 'edit', group: 'edit.page', label: '删除页', icon: 'delete', order: 30, variant: 'danger', needs: ['multiPage'], reason: '只有一页，无法删除', run: (a) => a.deletePages() },
-    { id: 'edit.ocr', tab: 'edit', group: 'edit.recognize', label: 'OCR 识别', icon: 'ocr', order: 10, needs: [], reason: 'OCR 由 19 章接入', run: () => undefined },
+    {
+      id: 'edit.ocr', tab: 'edit', group: 'edit.recognize', label: 'OCR 识别', icon: 'ocr', order: 10,
+      needs: ['document', 'ocrAvailable'], reason: '先打开文档并确认 OCR 引擎可用',
+      run: (a) => a.ocrRecognize('full'),
+    },
 
-    { id: 'ocr.recognize', tab: 'ocr', group: 'ocr.main', label: '识别', icon: 'ocr', order: 10, needs: [], reason: 'OCR 由 19 章接入', run: () => undefined },
-    { id: 'ocr.merge', tab: 'ocr', group: 'ocr.main', label: '合并文本层', icon: 'layers', order: 20, needs: [], reason: 'OCR 由 19 章接入', run: () => undefined },
-    { id: 'ocr.correct', tab: 'ocr', group: 'ocr.main', label: '校正', icon: 'editText', order: 30, needs: [], reason: 'OCR 由 19 章接入', run: () => undefined },
-    { id: 'ocr.export', tab: 'ocr', group: 'ocr.main', label: '导出文本', icon: 'export', order: 40, needs: [], reason: 'OCR 由 19 章接入', run: () => undefined },
+    { id: 'ocr.recognize', tab: 'ocr', group: 'ocr.main', label: '全文识别', icon: 'ocr', order: 10, needs: ['document', 'ocrAvailable'], reason: '先打开文档并确认 OCR 引擎可用', run: (a) => a.ocrRecognize('full') },
+    { id: 'ocr.pause', tab: 'ocr', group: 'ocr.main', label: '暂停', icon: 'select', order: 15, needs: ['ocrRunning'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrPause() },
+    { id: 'ocr.resume', tab: 'ocr', group: 'ocr.main', label: '继续', icon: 'select', order: 16, needs: ['ocrPaused'], reason: '当前没有已暂停的 OCR 任务', run: (a) => a.ocrResume() },
+    { id: 'ocr.cancel', tab: 'ocr', group: 'ocr.main', label: '取消', icon: 'close', order: 17, needs: ['ocrRunning', 'ocrPaused'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrCancel() },
+    { id: 'ocr.apply', tab: 'ocr', group: 'ocr.main', label: '应用首个结果', icon: 'save', order: 20, needs: ['document', 'ocrApplyable'], reason: '先接受首个 OCR 结果，且结果必须来自文本对象', run: (a) => a.ocrApply(0) },
+    { id: 'ocr.search', tab: 'ocr', group: 'ocr.main', label: '结果内查找', icon: 'outline', order: 30, needs: ['ocrResults'], reason: '先完成 OCR 识别', run: (a) => a.searchInOcr() },
+    { id: 'ocr.merge', tab: 'ocr', group: 'ocr.main', label: '合并文本层', icon: 'layers', order: 40, needs: [], reason: '合并策略由后续章节接入', run: () => undefined },
 
     { id: 'annotation.highlight', tab: 'annotation', group: 'annotation.main', label: '高亮', icon: 'annotation', order: 10, needs: [], reason: '批注由 20 章接入', run: () => undefined },
     { id: 'annotation.underline', tab: 'annotation', group: 'annotation.main', label: '下划线', icon: 'annotation', order: 20, needs: [], reason: '批注由 20 章接入', run: () => undefined },
@@ -480,8 +541,34 @@ export const builtinFeature: DesktopFeature = {
         { id: 'cancel', label: '取消编辑', icon: 'close', disabled: !ctx.editing.active, run: () => actions.cancel() },
         { id: 'selectAll', label: '全选对象', icon: 'select', separatorBefore: true, disabled: !ctx.hasDocument, run: () => actions.selectAll() },
         { id: 'clear', label: '清空选择', disabled: !ctx.hasDocument, run: () => actions.clearSelection() },
+        {
+          id: 'deleteObject', label: '删除对象', icon: 'delete', disabled: true,
+          title: '对象删除由 18A C-9 排除，本章不实现', run: () => undefined,
+        },
         { id: 'undo', label: '撤销', icon: 'undo', separatorBefore: true, disabled: !ctx.canUndo, run: () => actions.undo() },
         { id: 'redo', label: '重做', icon: 'redo', disabled: !ctx.canRedo, run: () => actions.redo() },
+      ],
+    },
+    {
+      id: 'builtin.ocr',
+      order: 20,
+      items: (ctx, actions) => [
+        {
+          id: 'ocr.recognize', label: 'OCR 识别', icon: 'ocr', separatorBefore: true,
+          disabled: !ctx.hasDocument || !ctx.ocrAvailable,
+          title: ctx.ocrAvailable ? '对当前文档执行全文 OCR' : '没有可用的 OCR 引擎',
+          run: () => actions.ocrRecognize('full'),
+        },
+        {
+          id: 'ocr.copy', label: '复制 OCR 文本', icon: 'text',
+          disabled: ctx.ocrResultCount === 0, title: '先完成 OCR 识别',
+          run: () => actions.ocrCopyResult(),
+        },
+        {
+          id: 'ocr.review', label: '审核 OCR 结果', icon: 'outline',
+          disabled: ctx.ocrResultCount === 0, title: '切换到 OCR 工作区查看 Review',
+          run: () => actions.searchInOcr(),
+        },
       ],
     },
   ],
@@ -506,6 +593,14 @@ export const builtinFeature: DesktopFeature = {
     { id: 'selectAll', combo: 'ctrl+a', order: 150, enabled: (ctx) => ctx.hasDocument, run: (a) => a.selectAll() },
     { id: 'nextPage', combo: 'pagedown', order: 160, run: (a) => a.nextPage() },
     { id: 'prevPage', combo: 'pageup', order: 170, run: (a) => a.prevPage() },
+    {
+      id: 'searchOcr', combo: 'ctrl+f', order: 180,
+      enabled: (ctx) => ctx.ocrResultCount > 0, run: (a) => a.searchInOcr(),
+    },
+    {
+      id: 'deleteObject', combo: 'delete', order: 190,
+      enabled: () => false, run: () => undefined,
+    },
   ],
 
   // ---- Theme Framework：token 名册（值在 tokens.css） ----
@@ -515,6 +610,12 @@ export const builtinFeature: DesktopFeature = {
     { id: 'paper', cssVar: '--dw-paper', usage: '画布纸张背景' },
     { id: 'text', cssVar: '--dw-text', usage: '正文文字' },
     { id: 'danger', cssVar: '--dw-danger', usage: '危险操作 / 错误提示' },
+    { id: 'ocrHigh', cssVar: '--dw-ocr-high', usage: 'OCR 高置信度 BBox' },
+    { id: 'ocrMid', cssVar: '--dw-ocr-mid', usage: 'OCR 中置信度 BBox' },
+    { id: 'ocrLow', cssVar: '--dw-ocr-low', usage: 'OCR 低置信度 BBox' },
+    { id: 'motionFast', cssVar: '--dw-motion-fast', usage: 'Overlay / Tooltip 快速过渡' },
+    { id: 'motionNormal', cssVar: '--dw-motion-normal', usage: 'Progress / Panel 常规过渡' },
+    { id: 'uiScale', cssVar: '--dw-ui-scale', usage: 'HiDPI 投影缩放（WebView DPR）' },
   ],
 
   // ---- Dock Framework：六槽位结构冻结（不实现浮动 / 保存） ----
@@ -560,7 +661,11 @@ export const builtinFeature: DesktopFeature = {
       },
       tone: (ctx) => (ctx.saveFeedback === 'failed' ? 'danger' : ctx.saveFeedback === 'saving' ? 'warn' : ctx.dirty ? 'warn' : 'ok'),
     },
-    { id: 'ocr', label: 'OCR', order: 100, value: () => 'OCR 未接入' },
+    {
+      id: 'ocr', label: 'OCR', order: 100,
+      value: (ctx) => `${ctx.ocrStateLabel} · ${ctx.ocrProgress}% · ${ctx.ocrResultCount} 条`,
+      tone: (ctx) => (ctx.ocrStateLabel.includes('失败') ? 'danger' : ctx.ocrStateLabel.includes('识别中') ? 'warn' : undefined),
+    },
     { id: 'ai', label: 'AI', order: 110, value: () => 'AI 未接入' },
     { id: 'memory', label: '内存', order: 120, value: () => '—' },
     { id: 'parser', label: '解析器', order: 130, value: (ctx) => ctx.parserText },

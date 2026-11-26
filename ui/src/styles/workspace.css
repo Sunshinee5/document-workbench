@@ -164,3 +164,115 @@
   color: var(--dw-text-muted);
   cursor: not-allowed;
 }
+
+/* ---- OCR Workspace（第19章）：Provider / 范围 / 结果 / Review ---- */
+
+.dw-ocr-provider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--dw-border);
+}
+
+.dw-ocr-provider label {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+.dw-ocr-provider select {
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+  font-size: 11px;
+}
+
+.dw-ocr-hint {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.dw-ocr-actions,
+.dw-ocr-footer,
+.dw-ocr-result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dw-ocr-actions {
+  padding: 8px 10px 4px;
+}
+
+.dw-ocr-input {
+  width: calc(100% - 20px);
+  margin: 2px 10px;
+  padding: 4px 6px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+  font-size: 11px;
+}
+
+.dw-ocr-session {
+  padding: 4px 10px 0;
+}
+
+.dw-ocr-status {
+  color: var(--dw-text);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.dw-ocr-results {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 10px 12px;
+}
+
+.dw-ocr-result {
+  padding: 6px 8px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius);
+  background: var(--dw-surface-2);
+}
+
+.dw-ocr-result-head,
+.dw-ocr-result-bbox {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--dw-text-muted);
+  font-size: 10px;
+}
+
+.dw-ocr-result-text {
+  padding: 4px 0;
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.dw-ocr-result-kind {
+  color: var(--dw-accent);
+}
+
+.dw-ocr-review {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 4px;
+  border-top: 1px solid var(--dw-border);
+}
+
+.dw-ocr-diff {
+  color: var(--dw-text-muted);
+  font-family: var(--dw-font-mono);
+  font-size: 10px;
+  line-height: 1.5;
+}

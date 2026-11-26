@@ -61,21 +61,6 @@ export function AttachmentsPanel() {
   );
 }
 
-/** OCR：19 章。入口可见但禁用。 */
-export function OcrPanel() {
-  return (
-    <EmptyWorkspace
-      title="OCR"
-      text="OCR 尚未接入"
-      hint="19 章接入后，这里显示识别结果、置信度与文本层合并状态。"
-    >
-      <Button size="sm" disabled title="OCR 由 19 章接入">
-        识别当前页
-      </Button>
-    </EmptyWorkspace>
-  );
-}
-
 /** 批注：20 章。 */
 export function AnnotationPanel() {
   return (

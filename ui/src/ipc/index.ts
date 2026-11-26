@@ -566,3 +566,102 @@ export async function coreEvents(cursor: number): Promise<EventCursor> {
 export async function coreStatus(): Promise<CoreStatus> {
   return invoke<CoreStatus>('core_status');
 }
+
+// ---------------------------------------------------------------------------
+// 第19章：OCR Workspace（规范 20）。OCR 只产出结果，Apply 走 Editing Engine。
+// ---------------------------------------------------------------------------
+
+/** OCR Provider 摘要。 */
+export interface OcrProviderInfo {
+  name: string;
+  available: boolean;
+}
+
+/** OCR 结果：五字段 + 源对象 id。 */
+export interface OcrResultInfo {
+  page: number;
+  bbox: [number, number, number, number];
+  confidence: number;
+  language: string;
+  text: string;
+  rotation: number;
+  provider: string;
+  source_object_id: number | null;
+}
+
+/** OCR Review 记录。 */
+export interface OcrReviewInfo {
+  result_index: number;
+  original: string;
+  ocr_text: string;
+  diff: string;
+  decision: string;
+}
+
+/** OCR 会话投影（状态栏与工作区数据源）。 */
+export interface OcrSessionInfo {
+  session_id: number;
+  state: string;
+  state_label: string;
+  progress: number;
+  completed_pages: number;
+  total_pages: number;
+  error: string;
+  results: OcrResultInfo[];
+  reviews: OcrReviewInfo[];
+}
+
+/** 列出 Provider。 */
+export async function ocrProviders(): Promise<OcrProviderInfo[]> {
+  return invoke<OcrProviderInfo[]>('ocr_providers');
+}
+
+/** 当前 OCR 会话。 */
+export async function ocrStatus(): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_status');
+}
+
+/** 启动 OCR（pages 空表示全文；region 为 PDF 点 bbox）。 */
+export async function ocrStart(
+  documentId: number,
+  pages: number[],
+  region: [number, number, number, number] | null,
+  providerName: string | null,
+): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_start', {
+    documentId,
+    pages,
+    region,
+    providerName,
+  });
+}
+
+/** 暂停 OCR。 */
+export async function ocrPause(): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_pause');
+}
+
+/** 继续 OCR。 */
+export async function ocrResume(): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_resume');
+}
+
+/** 取消 OCR。 */
+export async function ocrCancel(): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_cancel');
+}
+
+/** 审核决定。 */
+export async function ocrDecide(index: number, accept: boolean): Promise<OcrSessionInfo> {
+  return invoke<OcrSessionInfo>('ocr_decide', { index, accept });
+}
+
+/** 应用结果（走 Editing Engine）。 */
+export async function ocrApply(resultIndex: number): Promise<CommitInfo> {
+  return invoke<CommitInfo>('ocr_apply', { resultIndex });
+}
+
+/** 清空缓存。 */
+export async function ocrClearCache(): Promise<number> {
+  return invoke<number>('ocr_clear_cache');
+}

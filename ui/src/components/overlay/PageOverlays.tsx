@@ -4,7 +4,7 @@
 // 只把只读几何投影传给注册项的 render。禁止 Canvas 直接画 Overlay。
 import { Fragment } from 'react';
 import { desktopFramework } from '../../framework';
-import type { OverlayObject } from '../../framework';
+import type { OverlayObject, OverlayRenderProps } from '../../framework';
 
 export type { OverlayObject } from '../../framework';
 
@@ -64,6 +64,8 @@ export interface PageOverlaysProps {
   hoverKind?: string;
   hoverPriority?: string;
   primaryObjectId?: number | null;
+  /** 第19章：当前页 OCR 结果投影（只读，来自 OcrController）。 */
+  ocrResults?: OverlayRenderProps['ocrResults'];
 }
 
 /** 单页 Overlay：按注册层顺序渲染，层内按贡献 order 排序。 */
@@ -81,6 +83,7 @@ export function PageOverlays({
   hoverKind = '',
   hoverPriority = '',
   primaryObjectId = null,
+  ocrResults = [],
 }: PageOverlaysProps) {
   const layers = desktopFramework.registries.overlayLayers.sorted();
   const contributions = desktopFramework.registries.overlays.sorted();
@@ -98,6 +101,7 @@ export function PageOverlays({
     hoverPriority,
     hoverKind,
     primaryObjectId,
+    ocrResults,
   };
 
   return (

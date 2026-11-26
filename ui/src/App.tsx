@@ -19,7 +19,7 @@ import {
   BookmarksPanel,
   DocumentTabs,
   ObjectsPanel,
-  OcrPanel,
+  OcrWorkspace,
   OutlinePanel,
   PagesPanel,
   WorkspaceNav,
@@ -35,7 +35,8 @@ import {
   type InspectorDocumentInfo,
   type OverlayObject,
 } from './framework';
-import type { InspectorInfo, ObjectNodeInfo } from './ipc';
+import type { CommitInfo, InspectorInfo, ObjectNodeInfo } from './ipc';
+import { OcrController } from './ocr/ocrController';
 import { applyTheme, loadTheme, saveTheme, watchSystemTheme, type ThemeMode } from './theme';
 import { WorkbenchViewModel, formatSize } from './viewmodels';
 import './index.css';
@@ -63,6 +64,8 @@ export default function App() {
   const [editorState, setEditorState] = useState(() => editor.snapshot);
   const eventBridge = useMemo(() => new EventBridge(), []);
   const [feedback, setFeedback] = useState(() => eventBridge.snapshot);
+  const ocr = useMemo(() => new OcrController(), []);
+  const [ocrState, setOcrState] = useState(() => ocr.snapshot);
   const [inspector, setInspector] = useState<InspectorInfo | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -71,9 +74,24 @@ export default function App() {
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
   useEffect(() => editor.subscribe(() => setEditorState(editor.snapshot)), [editor]);
   useEffect(() => eventBridge.subscribe(() => setFeedback(eventBridge.snapshot)), [eventBridge]);
+  useEffect(() => ocr.subscribe(() => setOcrState(ocr.snapshot)), [ocr]);
   useEffect(() => {
     void viewModel.initialize().then(() => eventBridge.poll());
   }, [viewModel, eventBridge]);
+  useEffect(() => {
+    void ocr.initialize();
+  }, [ocr]);
+
+  // HiDPI（规范 20 §五）：WebView 已处理像素缩放，这里只登记 DPR 供 CSS Token 使用。
+  useEffect(() => {
+    const applyScale = () => {
+      const scale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      document.documentElement.style.setProperty('--dw-ui-scale', String(scale));
+    };
+    applyScale();
+    window.addEventListener('resize', applyScale);
+    return () => window.removeEventListener('resize', applyScale);
+  }, []);
 
   useEffect(() => {
     applyTheme(theme);
@@ -97,7 +115,8 @@ export default function App() {
     setContextMenu(null);
     if (previous !== null && previous !== current) void editor.close(previous);
     if (current !== null) void editor.open(current);
-  }, [state.activeDocumentId, editor]);
+    void ocr.refresh();
+  }, [state.activeDocumentId, editor, ocr]);
 
   // Save 结果反馈：事件桥翻转到 success/failed 时轻提示（不写回真值）。
   const lastSaveFeedbackRef = useRef(feedback.saveFeedback);
@@ -161,6 +180,14 @@ export default function App() {
     : state.lastSavedAt
       ? `已保存 ${state.lastSavedAt}`
       : '—';
+  const ocrAvailable = ocrState.providers.some((provider) => provider.available);
+  const firstOcrResult = ocrState.session.results[0];
+  const firstOcrReview = ocrState.session.reviews[0];
+  const ocrApplyable = Boolean(
+    firstOcrResult
+    && firstOcrResult.source_object_id !== null
+    && firstOcrReview?.decision === '已接受',
+  );
 
   // 选择校验摘要（只读投影）：primary 必须属于 selected，且选择页与当前页一致。
   const selectionValidation = (() => {
@@ -209,12 +236,18 @@ export default function App() {
     saveFeedback: feedback.saveFeedback,
     saveMessage: feedback.saveMessage,
     lastEvent: feedback.lastEvent,
+    ocrStateLabel: ocrState.session.state_label,
+    ocrProgress: ocrState.session.progress,
+    ocrResultCount: ocrState.session.results.length,
+    ocrAvailable,
+    ocrApplyable,
   }), [
     mode, theme, state.activeDocumentId, state.currentPage, state.pageCount, state.zoom,
     editorState.capability, editorState.selection, editorState.editing, editorState.hover,
     state.canUndo, state.canRedo, state.dirty, editorState.pendingPatches, editorState.revision,
     parserText, saveText, state.taskEvent, state.error,
     toolLabel, hoverPriority, selectionValidation, feedback.saveFeedback, feedback.saveMessage, feedback.lastEvent,
+    ocrState.session.state_label, ocrState.session.progress, ocrState.session.results.length, ocrAvailable, ocrApplyable,
   ]);
 
   // ---- FrameworkActions：意图转发，注册表只声明不持有 ViewModel ----
@@ -225,6 +258,40 @@ export default function App() {
 
   /** 命令成功后拉取增量事件：真值仍来自命令快照，事件只驱动反馈。 */
   const pollFeedback = useCallback(() => void eventBridge.poll(), [eventBridge]);
+
+  /** 提交结果统一回写两个投影：EditorState（编辑态）与 ViewModel（壳层脏标记）。 */
+  const acceptCommit = useCallback((info: CommitInfo | null) => {
+    if (!info) {
+      push(ocr.snapshot.error || '提交失败', 'error');
+      return;
+    }
+    editor.applySnapshot(info.snapshot);
+    viewModel.applyEditorSnapshot(info.snapshot);
+    pollFeedback();
+    push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
+  }, [editor, viewModel, ocr, pollFeedback, push]);
+
+  /** OCR 启动：只把意图交给 Controller，完成/失败统一走 Toast。 */
+  const startOcr = useCallback(async (pages: number[], region: [number, number, number, number] | null) => {
+    const id = state.activeDocumentId;
+    if (id === null) {
+      push('请先打开文档，再执行 OCR', 'error');
+      return;
+    }
+    await ocr.start(id, pages, region);
+    const session = ocr.snapshot.session;
+    if (session.state === 'Failed') {
+      push(session.error || 'OCR 识别失败', 'error');
+    } else if (session.state === 'Completed') {
+      push(`OCR 完成：${session.results.length} 条结果`, 'success');
+    }
+  }, [state.activeDocumentId, ocr, push]);
+
+  /** OCR 控制命令的异常统一提示，不把 ErrorPanel 写成第二套 Toast。 */
+  const checkOcrError = useCallback(() => {
+    const error = ocr.snapshot.error;
+    if (error) push(error, 'error');
+  }, [ocr, push]);
 
   const actions = useMemo<FrameworkActions>(() => ({
     open: () => void viewModel.openFile().then(pollFeedback),
@@ -289,18 +356,57 @@ export default function App() {
         editor.setMode('edit');
       })();
     },
-    commit: () => void editor.commit().then((info) => {
-      pollFeedback();
-      if (info) push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
-    }),
+    commit: () => void editor.commit().then(acceptCommit),
     cancel: () => void editor.cancel().then(pollFeedback),
-    replaceText: (text) => void editor.commit(text).then((info) => {
-      pollFeedback();
-      if (info) push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
-    }),
+    replaceText: (text) => void editor.commit(text).then(acceptCommit),
     selectAll: () => void editor.selectAll(editorState.page).then(pollFeedback),
     clearSelection: () => void editor.clearSelection(editorState.page).then(pollFeedback),
-  }), [viewModel, editor, refreshEditor, pollFeedback, eventBridge, push, state.pageCount, state.currentPage, editorState.selection.primary, editorState.page, ctx]);
+
+    // ---- 第19章：OCR 动作（全部转发 OcrController） ----
+    ocrRecognize: (scope) => {
+      if (scope === 'full') {
+        void startOcr([], null);
+        return;
+      }
+      if (scope === 'pages') {
+        void startOcr([state.currentPage], null);
+        return;
+      }
+      const page = state.objectTree?.pages.find((item) => item.page === state.currentPage);
+      if (!page) {
+        push('当前页缺少尺寸投影，无法执行区域 OCR', 'error');
+        return;
+      }
+      void startOcr([], [0, 0, page.page_width, page.page_height]);
+    },
+    ocrPause: () => void ocr.pause().then(checkOcrError),
+    ocrResume: () => void ocr.resume().then(checkOcrError),
+    ocrCancel: () => void ocr.cancel().then(checkOcrError),
+    ocrApply: (index) => void ocr.apply(index).then(acceptCommit),
+    searchInOcr: () => {
+      setWorkspace('ocr');
+      setRibbonTab('ocr');
+    },
+    ocrCopyResult: () => {
+      const text = ocr.results[0]?.text ?? '';
+      if (!text) {
+        push('没有可复制的 OCR 结果', 'error');
+        return;
+      }
+      const clipboard = navigator.clipboard;
+      if (!clipboard) {
+        push('当前环境不支持剪贴板', 'error');
+        return;
+      }
+      void clipboard.writeText(text)
+        .then(() => push('已复制首条 OCR 文本', 'success'))
+        .catch(() => push('复制失败：剪贴板不可用', 'error'));
+    },
+  }), [
+    viewModel, editor, refreshEditor, pollFeedback, eventBridge, push, acceptCommit, startOcr, checkOcrError,
+    ocr, state.pageCount, state.currentPage, state.objectTree,
+    editorState.selection.primary, editorState.page, ctx,
+  ]);
 
   // ---- 画布回调：命中走 Controller，不自行解析 ----
   const handlePageCount = useCallback((count: number) => viewModel.reportPageCount(count), [viewModel]);
@@ -378,10 +484,28 @@ export default function App() {
         objects,
       };
     }
+    // 第19章：OCR 结果按页投影到同一 Overlay Stack，不建第二套覆盖层。
+    for (const result of ocrState.session.results) {
+      const data = map[result.page];
+      if (!data) continue;
+      (data.ocrResults ??= []).push({
+        page: result.page,
+        bbox: result.bbox,
+        confidence: result.confidence,
+        text: result.text,
+      });
+    }
     return map;
-  }, [state.objectTree]);
+  }, [state.objectTree, ocrState.session.results]);
 
   const hasDocument = state.activeDocumentId !== null;
+
+  // 第19章：Busy / Forbidden 也走同一个 data-cursor 出口，不新增第二套光标管理。
+  const cursorKind = ocrState.session.state === 'Running'
+    ? 'busy'
+    : desktopFramework.registries.tools.get(mode)?.enabled(ctx) === false
+      ? 'forbidden'
+      : desktopFramework.resolveCursor(mode);
 
   // ---- 右键菜单项：来自 ContextMenuRegistry ----
   const menuItems = useMemo<MenuItemView[]>(() => {
@@ -438,7 +562,21 @@ export default function App() {
       case 'bookmarks': return <BookmarksPanel />;
       case 'outline': return <OutlinePanel />;
       case 'attachments': return <AttachmentsPanel />;
-      case 'ocr': return <OcrPanel />;
+      case 'ocr':
+        return (
+          <OcrWorkspace
+            state={ocrState}
+            hasDocument={hasDocument}
+            onStart={(pages, region) => void startOcr(pages, region)}
+            onProvider={(name) => ocr.setProvider(name)}
+            onPause={() => void ocr.pause().then(checkOcrError)}
+            onResume={() => void ocr.resume().then(checkOcrError)}
+            onCancel={() => void ocr.cancel().then(checkOcrError)}
+            onDecide={(index, accept) => void ocr.decide(index, accept)}
+            onApply={(index) => void ocr.apply(index).then(acceptCommit)}
+            onClearCache={() => void ocr.clearCache()}
+          />
+        );
       case 'annotation': return <AnnotationPanel />;
       case 'ai': return <AiPanel />;
       default: return null;
@@ -510,7 +648,7 @@ export default function App() {
               hoverKind={editorState.hover?.kind_label ?? ''}
               hoverPriority={hoverPriority}
               primaryObjectId={editorState.selection.primary}
-              cursorKind={desktopFramework.resolveCursor(mode)}
+              cursorKind={cursorKind}
               onPagePointerMove={handlePointerMove}
               onPagePointerLeave={handlePointerLeave}
               onPageClick={handlePageClick}

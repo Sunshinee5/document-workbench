@@ -3,6 +3,7 @@
 // 全项目基础组件只从这里取；功能模块禁止自己实现第二套按钮 / 面板 / 树。
 export { Button, type ButtonProps, type ButtonSize, type ButtonVariant } from './Button';
 export { ContextMenu, type ContextMenuProps, type MenuItemView } from './ContextMenu';
+export { Progress, Skeleton, ErrorPanel, Tooltip } from './Feedback';
 export { Icon, type IconName } from './Icon';
 export { Panel, PanelEmpty, type PanelProps } from './Panel';
 export { PropertyGrid, PropertySection, type PropertyRow } from './PropertyGrid';

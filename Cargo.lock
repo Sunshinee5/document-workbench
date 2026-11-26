@@ -781,6 +781,7 @@ version = "0.1.0"
 dependencies = [
  "dw-core",
  "dw-log",
+ "dw-ocr",
  "dw-pdf",
  "dw-runtime",
  "serde",
