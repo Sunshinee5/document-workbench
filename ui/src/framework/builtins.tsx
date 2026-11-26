@@ -50,17 +50,18 @@ function projectBox(
   };
 }
 
-/** Selection/Hover/Caret/BBox 覆盖层渲染（AD-10 允许的四种）。 */
+/** Selection/Hover/Caret/BBox 覆盖层渲染（AD-10 / 18C AD-27 Primary 高亮 + AD-28 优先级提示）。 */
 function renderSelectionOverlay(props: OverlayRenderProps) {
   const { pageWidth, pageHeight, rotation, objects, hoverObjectId, selectedObjectIds, editingObjectId } = props;
-  return objects.map((object) => {
+  const boxes = objects.map((object) => {
     const box = projectBox(object.bbox, pageWidth, pageHeight, rotation);
     const selected = selectedObjectIds.includes(object.objectId);
     const hovered = hoverObjectId === object.objectId;
     const editing = editingObjectId === object.objectId;
+    const primary = selected && props.primaryObjectId === object.objectId;
     if (!selected && !hovered && !editing) return null;
     const classes = ['dw-object-box'];
-    if (selected) classes.push('is-selected');
+    if (selected) classes.push(primary ? 'is-primary' : 'is-selected');
     if (hovered) classes.push('is-hover');
     return (
       <div
@@ -73,6 +74,12 @@ function renderSelectionOverlay(props: OverlayRenderProps) {
           height: `${box.height}%`,
         }}
       >
+        {primary ? <span className="dw-primary-tag">主选</span> : null}
+        {hovered && props.hoverKind ? (
+          <span className="dw-hover-tag">
+            {props.hoverKind}{props.hoverPriority ? ` · ${props.hoverPriority}` : ''}
+          </span>
+        ) : null}
         {editing ? <span className="dw-caret" /> : null}
         {selected ? (
           <>
@@ -85,6 +92,57 @@ function renderSelectionOverlay(props: OverlayRenderProps) {
       </div>
     );
   });
+  return boxes;
+}
+
+/** Inline Text Editor（18C AD-26）：编辑态浮在对象 BBox 上，唯一页面内输入入口。 */
+function InlineTextEditor({ props }: { props: OverlayRenderProps }) {
+  const [draft, setDraft] = useState(props.editingText ?? '');
+  useEffect(() => setDraft(props.editingText ?? ''), [props.editingObjectId, props.editingText]);
+  const object = props.objects.find((item) => item.objectId === props.editingObjectId);
+  if (!object) return null;
+  const box = projectBox(object.bbox, props.pageWidth, props.pageHeight, props.rotation);
+  return (
+    <div
+      className="dw-inline-editor-wrap"
+      style={{
+        left: `${box.left}%`,
+        top: `${box.top}%`,
+        width: `${Math.max(box.width, 18)}%`,
+        height: `${Math.max(box.height, 6)}%`,
+      }}
+    >
+      <textarea
+        className="dw-inline-editor"
+        aria-label="页面内文本编辑"
+        value={draft}
+        autoFocus
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault();
+            props.onCommitText?.(draft);
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            props.onCancelEdit?.();
+          }
+          event.stopPropagation();
+        }}
+        onBlur={() => {
+          // 失焦不自动提交：避免点击 Inspector 时产生双提交；提交仍走 Enter / Ribbon。
+        }}
+      />
+      <div className="dw-inline-editor-actions">
+        <button type="button" onClick={() => props.onCommitText?.(draft)}>提交</button>
+        <button type="button" onClick={() => props.onCancelEdit?.()}>取消</button>
+      </div>
+    </div>
+  );
+}
+
+/** editing 层注册项：Inline Editor（草稿是事务输入，不进注册表）。 */
+function renderEditingOverlay(props: OverlayRenderProps) {
+  return props.editingObjectId !== null ? <InlineTextEditor props={props} /> : null;
 }
 
 /** Inspector 文本分区（18A 行为：字段只读，Unicode 可编辑提交）。 */
@@ -276,11 +334,35 @@ export const builtinFeature: DesktopFeature = {
   ],
   overlays: [
     { id: 'selection.boxes', layer: 'selection', order: 10, render: renderSelectionOverlay },
+    { id: 'editing.inline', layer: 'editing', order: 10, render: renderEditingOverlay },
   ],
 
   // ---- Inspector Framework：分区由注册表渲染 ----
   inspectors: [
     { id: 'document', title: '文档', order: 10, matches: () => true, render: DocumentInspectorSection },
+    {
+      id: 'object', title: '对象', order: 15, matches: () => true, render: ({ inspector }) => (
+        <PropertySection title="对象">
+          <PropertyGrid
+            rows={inspector
+              ? [
+                  { label: 'ObjectId', value: `#${inspector.object_id}`, mono: true },
+                  { label: '类型', value: `${inspector.kind_label}（${inspector.kind}）`, mono: true },
+                  { label: '页码', value: `第 ${inspector.page} 页`, mono: true },
+                  {
+                    label: 'Bounding Box',
+                    value: inspector.bbox.map((value) => value.toFixed(1)).join(', '),
+                    mono: true,
+                  },
+                  { label: '层级 z', value: String(inspector.z_index), mono: true },
+                  { label: '版本', value: `v${inspector.version}`, mono: true },
+                  { label: '生命周期', value: inspector.lifecycle, mono: true },
+                ]
+              : [{ label: '对象', value: '未选中对象', muted: true }]}
+          />
+        </PropertySection>
+      ),
+    },
     {
       id: 'text', title: '文本', order: 20, matches: () => true, render: (props) => <TextInspectorSection {...props} />,
     },
@@ -449,16 +531,39 @@ export const builtinFeature: DesktopFeature = {
   statusItems: [
     { id: 'zoom', label: '缩放', order: 10, value: (ctx) => `${ctx.zoomPercent}%` },
     { id: 'page', label: '页码', order: 20, render: (ctx, actions) => <PageStatusInput ctx={ctx} actions={actions} /> },
-    { id: 'selection', label: '选择', order: 30, value: (ctx) => `Selection(${ctx.selection.primary ?? 'None'})` },
+    {
+      id: 'selection', label: '选择', order: 30,
+      value: (ctx) => {
+        const count = ctx.selection.selected.length;
+        if (count === 0) return `Selection(0) · ${ctx.selectionValidation}`;
+        return `Selection(${count}, primary #${ctx.selection.primary ?? '—'}) · ${ctx.selectionValidation}`;
+      },
+      tone: (ctx) => (ctx.selectionValidation === '失效' ? 'warn' : undefined),
+    },
+    { id: 'tool', label: '当前工具', order: 35, value: (ctx) => `工具(${ctx.toolLabel})` },
     { id: 'mode', label: '光标模式', order: 40, value: (ctx) => ctx.mode },
-    { id: 'editing', label: '编辑', order: 50, value: (ctx) => (ctx.editing.active ? '编辑中' : '—') },
+    {
+      id: 'editing', label: '编辑', order: 50,
+      value: (ctx) => (ctx.editing.active ? `编辑中 #${ctx.editing.objectId ?? '—'}` : '—'),
+      tone: (ctx) => (ctx.editing.active ? 'ok' : undefined),
+    },
     { id: 'dirty', label: '未保存', order: 60, value: (ctx) => (ctx.dirty ? '未保存' : '已保存'), tone: (ctx) => (ctx.dirty ? 'warn' : 'ok') },
     { id: 'undo', label: '撤销', order: 70, value: (ctx) => (ctx.canUndo ? '可撤销' : '—') },
     { id: 'redo', label: '重做', order: 80, value: (ctx) => (ctx.canRedo ? '可重做' : '—') },
-    { id: 'ocr', label: 'OCR', order: 90, value: () => 'OCR 未接入' },
-    { id: 'ai', label: 'AI', order: 100, value: () => 'AI 未接入' },
-    { id: 'memory', label: '内存', order: 110, value: () => '—' },
-    { id: 'parser', label: '解析器', order: 120, value: (ctx) => ctx.parserText },
-    { id: 'save', label: '保存', order: 130, value: (ctx) => ctx.saveText },
+    {
+      id: 'save', label: '保存', order: 90,
+      value: (ctx) => {
+        if (ctx.saveFeedback === 'saving') return '保存中…';
+        if (ctx.saveFeedback === 'failed') return ctx.saveMessage || '保存失败';
+        if (ctx.saveFeedback === 'success') return `${ctx.saveMessage || '保存成功'}${ctx.saveMessage ? '' : ''}`;
+        return ctx.saveText;
+      },
+      tone: (ctx) => (ctx.saveFeedback === 'failed' ? 'danger' : ctx.saveFeedback === 'saving' ? 'warn' : ctx.dirty ? 'warn' : 'ok'),
+    },
+    { id: 'ocr', label: 'OCR', order: 100, value: () => 'OCR 未接入' },
+    { id: 'ai', label: 'AI', order: 110, value: () => 'AI 未接入' },
+    { id: 'memory', label: '内存', order: 120, value: () => '—' },
+    { id: 'parser', label: '解析器', order: 130, value: (ctx) => ctx.parserText },
+    { id: 'event', label: '最近事件', order: 140, value: (ctx) => ctx.lastEvent || '—' },
   ],
 };

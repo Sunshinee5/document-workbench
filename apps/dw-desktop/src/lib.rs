@@ -62,7 +62,10 @@ pub fn run() {
             ipc::editor_begin_edit,
             ipc::editor_commit,
             ipc::editor_cancel,
-            ipc::editor_inspector
+            ipc::editor_inspector,
+            // 19 章（18C）：只读事件游标与运行态投影
+            ipc::core_events,
+            ipc::core_status
         ])
         .run(tauri::generate_context!())
         .expect("文档工作台启动失败");

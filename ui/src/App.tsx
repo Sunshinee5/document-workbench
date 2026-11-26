@@ -26,6 +26,7 @@ import {
   type WorkspaceKind,
 } from './components/workspace';
 import { EditorController, type EditorMode } from './editor/editorState';
+import { EventBridge } from './editor/eventBridge';
 import {
   desktopFramework,
   initializeFramework,
@@ -60,6 +61,8 @@ export default function App() {
   const [focusedObject, setFocusedObject] = useState<ObjectNodeInfo | null>(null);
   const editor = useMemo(() => new EditorController(), []);
   const [editorState, setEditorState] = useState(() => editor.snapshot);
+  const eventBridge = useMemo(() => new EventBridge(), []);
+  const [feedback, setFeedback] = useState(() => eventBridge.snapshot);
   const [inspector, setInspector] = useState<InspectorInfo | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
@@ -67,9 +70,10 @@ export default function App() {
 
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
   useEffect(() => editor.subscribe(() => setEditorState(editor.snapshot)), [editor]);
+  useEffect(() => eventBridge.subscribe(() => setFeedback(eventBridge.snapshot)), [eventBridge]);
   useEffect(() => {
-    void viewModel.initialize();
-  }, [viewModel]);
+    void viewModel.initialize().then(() => eventBridge.poll());
+  }, [viewModel, eventBridge]);
 
   useEffect(() => {
     applyTheme(theme);
@@ -94,6 +98,19 @@ export default function App() {
     if (previous !== null && previous !== current) void editor.close(previous);
     if (current !== null) void editor.open(current);
   }, [state.activeDocumentId, editor]);
+
+  // Save 结果反馈：事件桥翻转到 success/failed 时轻提示（不写回真值）。
+  const lastSaveFeedbackRef = useRef(feedback.saveFeedback);
+  useEffect(() => {
+    const previous = lastSaveFeedbackRef.current;
+    lastSaveFeedbackRef.current = feedback.saveFeedback;
+    if (previous === feedback.saveFeedback) return;
+    if (feedback.saveFeedback === 'success') {
+      push(feedback.saveMessage || '保存成功', 'success');
+    } else if (feedback.saveFeedback === 'failed') {
+      push(feedback.saveMessage || '保存失败', 'error');
+    }
+  }, [feedback.saveFeedback, feedback.saveMessage, push]);
 
   // 主选对象变化 → 拉 Inspector（只读投影）。
   useEffect(() => {
@@ -145,6 +162,27 @@ export default function App() {
       ? `已保存 ${state.lastSavedAt}`
       : '—';
 
+  // 选择校验摘要（只读投影）：primary 必须属于 selected，且选择页与当前页一致。
+  const selectionValidation = (() => {
+    const selection = editorState.selection;
+    if (selection.selected.length === 0) return '无选择';
+    if (selection.primary !== null && !selection.selected.includes(selection.primary)) return '失效';
+    if (selection.page !== null && selection.page !== state.currentPage) return '跨页';
+    return '有效';
+  })();
+
+  // 命中优先级反馈：Hover 对象的 z_index（来自对象树只读投影）。
+  const hoverPriority = (() => {
+    const hover = editorState.hover;
+    if (!hover) return '';
+    const object = state.objectTree?.pages
+      .find((page) => page.page === hover.page)
+      ?.objects.find((item) => item.object_id === hover.object_id);
+    return object ? `z=${object.z_index}` : '';
+  })();
+
+  const toolLabel = desktopFramework.registries.tools.get(mode)?.label ?? mode;
+
   const ctx = useMemo<FrameworkContext>(() => ({
     mode,
     theme,
@@ -165,11 +203,18 @@ export default function App() {
     saveText,
     taskEvent: state.taskEvent,
     error: state.error,
+    toolLabel,
+    hitPriority: hoverPriority,
+    selectionValidation,
+    saveFeedback: feedback.saveFeedback,
+    saveMessage: feedback.saveMessage,
+    lastEvent: feedback.lastEvent,
   }), [
     mode, theme, state.activeDocumentId, state.currentPage, state.pageCount, state.zoom,
     editorState.capability, editorState.selection, editorState.editing, editorState.hover,
     state.canUndo, state.canRedo, state.dirty, editorState.pendingPatches, editorState.revision,
     parserText, saveText, state.taskEvent, state.error,
+    toolLabel, hoverPriority, selectionValidation, feedback.saveFeedback, feedback.saveMessage, feedback.lastEvent,
   ]);
 
   // ---- FrameworkActions：意图转发，注册表只声明不持有 ViewModel ----
@@ -178,14 +223,35 @@ export default function App() {
     if (id !== null) void editor.refresh(id);
   }, [editor, state.activeDocumentId]);
 
+  /** 命令成功后拉取增量事件：真值仍来自命令快照，事件只驱动反馈。 */
+  const pollFeedback = useCallback(() => void eventBridge.poll(), [eventBridge]);
+
   const actions = useMemo<FrameworkActions>(() => ({
-    open: () => void viewModel.openFile(),
-    save: () => void viewModel.save().then(refreshEditor),
-    saveAs: () => void viewModel.saveAs().then(refreshEditor),
-    undo: () => void viewModel.undo().then(refreshEditor),
-    redo: () => void viewModel.redo().then(refreshEditor),
-    rotate: (delta) => void viewModel.rotate(delta),
-    deletePages: () => void viewModel.deleteSelectedPages(),
+    open: () => void viewModel.openFile().then(pollFeedback),
+    save: () => {
+      eventBridge.markSaving();
+      void viewModel.save().then(() => {
+        refreshEditor();
+        pollFeedback();
+      });
+    },
+    saveAs: () => {
+      eventBridge.markSaving();
+      void viewModel.saveAs().then(() => {
+        refreshEditor();
+        pollFeedback();
+      });
+    },
+    undo: () => void viewModel.undo().then(() => {
+      refreshEditor();
+      pollFeedback();
+    }),
+    redo: () => void viewModel.redo().then(() => {
+      refreshEditor();
+      pollFeedback();
+    }),
+    rotate: (delta) => void viewModel.rotate(delta).then(pollFeedback),
+    deletePages: () => void viewModel.deleteSelectedPages().then(pollFeedback),
     zoomIn: () => viewModel.zoomIn(),
     zoomOut: () => viewModel.zoomOut(),
     fitWidth: () => viewerRef.current?.fitWidth(),
@@ -223,12 +289,18 @@ export default function App() {
         editor.setMode('edit');
       })();
     },
-    commit: () => void editor.commit(),
-    cancel: () => void editor.cancel(),
-    replaceText: (text) => void editor.commit(text),
-    selectAll: () => void editor.selectAll(editorState.page),
-    clearSelection: () => void editor.clearSelection(editorState.page),
-  }), [viewModel, editor, refreshEditor, state.pageCount, state.currentPage, editorState.selection.primary, editorState.page, ctx]);
+    commit: () => void editor.commit().then((info) => {
+      pollFeedback();
+      if (info) push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
+    }),
+    cancel: () => void editor.cancel().then(pollFeedback),
+    replaceText: (text) => void editor.commit(text).then((info) => {
+      pollFeedback();
+      if (info) push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
+    }),
+    selectAll: () => void editor.selectAll(editorState.page).then(pollFeedback),
+    clearSelection: () => void editor.clearSelection(editorState.page).then(pollFeedback),
+  }), [viewModel, editor, refreshEditor, pollFeedback, eventBridge, push, state.pageCount, state.currentPage, editorState.selection.primary, editorState.page, ctx]);
 
   // ---- 画布回调：命中走 Controller，不自行解析 ----
   const handlePageCount = useCallback((count: number) => viewModel.reportPageCount(count), [viewModel]);
@@ -432,6 +504,12 @@ export default function App() {
               hoverObjectId={editorState.hover?.object_id ?? null}
               selectedObjectIds={editorState.selection.selected}
               editingObjectId={editorState.editing.objectId}
+              editingText={inspector?.text?.unicode ?? ''}
+              onCommitText={(text) => actions.replaceText(text)}
+              onCancelEdit={() => actions.cancel()}
+              hoverKind={editorState.hover?.kind_label ?? ''}
+              hoverPriority={hoverPriority}
+              primaryObjectId={editorState.selection.primary}
               cursorKind={desktopFramework.resolveCursor(mode)}
               onPagePointerMove={handlePointerMove}
               onPagePointerLeave={handlePointerLeave}

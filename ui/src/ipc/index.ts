@@ -529,3 +529,40 @@ export async function editorCancel(documentId: number): Promise<EditorSnapshot> 
 export async function editorInspector(objectId: number): Promise<InspectorInfo | null> {
   return invoke<InspectorInfo | null>('editor_inspector', { objectId });
 }
+
+// ---------------------------------------------------------------------------
+// 19 章（18C）：Desktop Feature Completion。只读事件游标与运行态投影。
+// ---------------------------------------------------------------------------
+
+/** 单条事件投影：kind / message，不携带 payload（真值仍走命令快照）。 */
+export interface CoreEvent {
+  seq: number;
+  kind: string;
+  message: string;
+}
+
+/** 事件游标结果：cursor 为最新事件总数。 */
+export interface EventCursor {
+  cursor: number;
+  events: CoreEvent[];
+}
+
+/** 只读核心状态投影：保存状态与最近保存反馈。 */
+export interface CoreStatus {
+  document_id: number;
+  save_state: string;
+  last_save_message: string;
+  save_failed: boolean;
+  save_incremental: boolean;
+  event_count: number;
+}
+
+/** 增量拉取事件；cursor=0 表示从头拉取。 */
+export async function coreEvents(cursor: number): Promise<EventCursor> {
+  return invoke<EventCursor>('core_events', { cursor });
+}
+
+/** 读取运行态投影（保存状态 / 最近保存事件）。 */
+export async function coreStatus(): Promise<CoreStatus> {
+  return invoke<CoreStatus>('core_status');
+}

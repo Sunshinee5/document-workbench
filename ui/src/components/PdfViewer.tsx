@@ -89,6 +89,17 @@ interface PdfViewerProps {
   selectedObjectIds?: number[];
   /** 正在编辑的对象 id：显示 Caret。 */
   editingObjectId?: number | null;
+  /** 18C：编辑对象当前文本（Inline Editor 预填）。 */
+  editingText?: string;
+  /** 18C：Inline Editor 提交。 */
+  onCommitText?: (text: string) => void;
+  /** 18C：Inline Editor 取消。 */
+  onCancelEdit?: () => void;
+  /** 18C：Hover 对象种类与优先级（命中反馈）。 */
+  hoverKind?: string;
+  hoverPriority?: string;
+  /** 18C：Primary 选中对象 id。 */
+  primaryObjectId?: number | null;
   /** 光标种类：唯一来源是 CursorManager.resolve(toolId)，组件不得自行设置。 */
   cursorKind?: string;
   /** 右键：交给 App 从 ContextMenuRegistry 收集菜单项。 */
@@ -231,6 +242,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     hoverObjectId = null,
     selectedObjectIds = [],
     editingObjectId = null,
+    editingText = '',
+    onCommitText,
+    onCancelEdit,
+    hoverKind = '',
+    hoverPriority = '',
+    primaryObjectId = null,
     cursorKind = 'arrow',
     onPageContextMenu,
     onPagePointerMove,
@@ -520,6 +537,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               hoverObjectId={hoverObjectId}
               selectedObjectIds={selectedObjectIds}
               editingObjectId={editingObjectId}
+              editingText={editingText}
+              onCommitText={onCommitText}
+              onCancelEdit={onCancelEdit}
+              hoverKind={hoverKind}
+              hoverPriority={hoverPriority}
+              primaryObjectId={primaryObjectId}
             />
           </div>
         ))}

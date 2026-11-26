@@ -41,6 +41,18 @@ export interface FrameworkContext {
   saveText: string;
   taskEvent: string;
   error: string;
+  /** 18C：当前工具 label（来自 ToolRegistry）。 */
+  toolLabel: string;
+  /** 18C：最近命中优先级投影（来自 HitTest 反馈）。 */
+  hitPriority: string;
+  /** 18C：选择校验摘要（来自 SelectionInfo 一致性只读投影）。 */
+  selectionValidation: string;
+  /** 18C：保存态反馈（来自 EventBridge，不是 DocumentSaveState 真值）。 */
+  saveFeedback: 'idle' | 'saving' | 'success' | 'failed';
+  /** 18C：保存反馈描述（含增量标识）。 */
+  saveMessage: string;
+  /** 18C：最近事件中文描述。 */
+  lastEvent: string;
 }
 
 /** App 注入的动作集合：注册表只声明意图，不持有 ViewModel / IPC。 */
@@ -136,6 +148,18 @@ export interface OverlayRenderProps {
   hoverObjectId: number | null;
   selectedObjectIds: number[];
   editingObjectId: number | null;
+  /** 18C：编辑对象当前文本（投影，草稿仍由 Inline Editor 本地持有）。 */
+  editingText?: string;
+  /** 18C：Inline Editor 提交（走 editor_commit）。 */
+  onCommitText?: (text: string) => void;
+  /** 18C：Inline Editor 取消（走 editor_cancel）。 */
+  onCancelEdit?: () => void;
+  /** 18C：命中优先级提示（hover 时显示）。 */
+  hoverPriority?: string;
+  /** 18C：Hover 对象种类中文名。 */
+  hoverKind?: string;
+  /** 18C：Primary 选中对象 id（单独高亮）。 */
+  primaryObjectId?: number | null;
 }
 
 /** 对象几何投影（不是 Object 真值）；由对象树 IPC 快照投影得到。 */

@@ -5,7 +5,6 @@
 
 use std::path::{Path, PathBuf};
 
-use dw_core::capability::CapabilitySet;
 use dw_core::document::{DocumentId, DocumentKind, DocumentState, PageLayout};
 use dw_core::driver::ISave;
 use dw_core::eventbus::EventBus;

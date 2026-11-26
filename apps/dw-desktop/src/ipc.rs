@@ -1699,3 +1699,121 @@ pub fn editor_inspector(
     let editor = lock(&state.editor);
     Ok(editor.inspector(object_id))
 }
+
+// ---------------------------------------------------------------------------
+// 19 章（18C）：Desktop Feature Completion。
+// 只读状态投影 + 事件游标：不新增 Core 能力、不改 18 章数据流、不额外 emit。
+// ---------------------------------------------------------------------------
+
+/// 事件游标视图：cursor 是已消费的事件数，events 是自 cursor 起的增量。
+#[derive(Debug, Clone, Serialize)]
+pub struct EventView {
+    /// 全局递增序号（从 1 起）。
+    pub seq: u64,
+    /// 事件种类（SelectionChanged / EditingStarted / SaveCompleted …）。
+    pub kind: String,
+    /// 中文事件描述。
+    pub message: String,
+}
+
+/// 事件游标结果：拉取后前端保存 cursor 用于下次增量。
+#[derive(Debug, Clone, Serialize)]
+pub struct EventCursor {
+    /// 最新游标（= 当前事件总数）。
+    pub cursor: u64,
+    /// 自请求 cursor 起的增量事件。
+    pub events: Vec<EventView>,
+}
+
+/// 只读拉取 EventBus 增量事件（AD-24 / C-1）。
+///
+/// 幂等：cursor 等于总数时返回空集合；cursor 大于总数时钳制到总数。
+/// 事件只驱动 UI 反馈，不写回 EditorState 真值（C-7 保持）。
+#[tauri::command]
+pub fn core_events(cursor: u64, state: tauri::State<'_, CoreState>) -> EventCursor {
+    let events = lock(&state.event_bus);
+    let all = events.events();
+    let total = all.len() as u64;
+    let start = cursor.min(total) as usize;
+    let delta = all[start..]
+        .iter()
+        .enumerate()
+        .map(|(index, event)| EventView {
+            seq: (start + index + 1) as u64,
+            kind: event.kind.clone(),
+            message: event.message.clone(),
+        })
+        .collect();
+    EventCursor { cursor: total, events: delta }
+}
+
+/// 只读运行态投影：保存状态 / 最近保存事件 / 选择校验摘要。
+#[derive(Debug, Clone, Serialize)]
+pub struct CoreStatus {
+    /// 活动文档 id；无文档时为 0。
+    pub document_id: u64,
+    /// DocumentSaveState 文本投影（Clean / Dirty / Saving / Error）。
+    pub save_state: String,
+    /// 最近一次 Save 事件中文描述（无则空串）。
+    pub last_save_message: String,
+    /// 最近一次 Save 是否失败。
+    pub save_failed: bool,
+    /// 最近一次 Save 是否增量写。
+    pub save_incremental: bool,
+    /// 已发布事件总数（事件游标上限）。
+    pub event_count: u64,
+}
+
+/// 保存状态文本：与 `DocumentSaveState` 一一对应，不新增状态种类。
+fn save_state_text(state: DocumentSaveState) -> &'static str {
+    match state {
+        DocumentSaveState::Clean => "Clean",
+        DocumentSaveState::Dirty => "Dirty",
+        DocumentSaveState::Saving => "Saving",
+        DocumentSaveState::Error => "Error",
+    }
+}
+
+/// 只读核心状态（AD-23 / AD-29 / C-6）：UI 反馈源，不是第二真值。
+#[tauri::command]
+pub fn core_status(state: tauri::State<'_, CoreState>) -> CoreStatus {
+    let manager = lock(&state.session_manager);
+    let session = manager.active();
+    let document_id = session
+        .and_then(|item| item.workspace.view_state().active_document_id)
+        .map(|id| id.0)
+        .unwrap_or(0);
+    let save_state = session
+        .and_then(|item| {
+            item.workspace
+                .view_state()
+                .active_document_id
+                .and_then(|id| item.documents.get(id))
+        })
+        .map(|doc| save_state_text(doc.save_state()).to_string())
+        .unwrap_or_else(|| "Clean".to_string());
+
+    let events = lock(&state.event_bus);
+    let mut last_save_message = String::new();
+    let mut save_failed = false;
+    let mut save_incremental = false;
+    for event in events.events() {
+        if event.kind == "SaveCompleted" {
+            last_save_message = event.message.clone();
+            save_failed = false;
+            save_incremental = event.message.contains("增量");
+        } else if event.kind == "SaveFailed" {
+            last_save_message = event.message.clone();
+            save_failed = true;
+            save_incremental = false;
+        }
+    }
+    CoreStatus {
+        document_id,
+        save_state,
+        last_save_message,
+        save_failed,
+        save_incremental,
+        event_count: events.events().len() as u64,
+    }
+}

@@ -366,7 +366,7 @@ fn operand_number_of(object: &LopdfObject) -> Option<f64> {
 fn collect_text(operands: &[LopdfObject], two_byte: bool) -> (Vec<u32>, Option<String>) {
     let mut glyphs = Vec::new();
     let mut fragments: Vec<String> = Vec::new();
-    let mut push = |bytes: &[u8], glyphs: &mut Vec<u32>, fragments: &mut Vec<String>| {
+    let push = |bytes: &[u8], glyphs: &mut Vec<u32>, fragments: &mut Vec<String>| {
         if two_byte {
             for pair in bytes.chunks_exact(2) {
                 glyphs.push(u32::from(u16::from_be_bytes([pair[0], pair[1]])));

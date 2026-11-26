@@ -58,6 +58,12 @@ export interface PageOverlaysProps {
   hoverObjectId: number | null;
   selectedObjectIds: number[];
   editingObjectId: number | null;
+  editingText?: string;
+  onCommitText?: (text: string) => void;
+  onCancelEdit?: () => void;
+  hoverKind?: string;
+  hoverPriority?: string;
+  primaryObjectId?: number | null;
 }
 
 /** 单页 Overlay：按注册层顺序渲染，层内按贡献 order 排序。 */
@@ -69,6 +75,12 @@ export function PageOverlays({
   hoverObjectId,
   selectedObjectIds,
   editingObjectId,
+  editingText = '',
+  onCommitText,
+  onCancelEdit,
+  hoverKind = '',
+  hoverPriority = '',
+  primaryObjectId = null,
 }: PageOverlaysProps) {
   const layers = desktopFramework.registries.overlayLayers.sorted();
   const contributions = desktopFramework.registries.overlays.sorted();
@@ -80,6 +92,12 @@ export function PageOverlays({
     hoverObjectId,
     selectedObjectIds,
     editingObjectId,
+    editingText,
+    onCommitText,
+    onCancelEdit,
+    hoverPriority,
+    hoverKind,
+    primaryObjectId,
   };
 
   return (
