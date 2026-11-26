@@ -1,20 +1,17 @@
-// 工作台主界面（规范 16）：TitleBar → Ribbon → Workspace → Canvas → Inspector → StatusBar。
+// 工作台主界面（规范 16 六区 / 18B Framework Freeze）。
 //
 // 职责边界：UI 只做「展示投影 + 转发意图」。
-// 按钮只调 ViewModel / 直接调 IPC 命令，不解析文档、不改 Document、不自己存真值。
-// 六区结构永久固定：新增能力只能加 Workspace / Ribbon 页签 / Inspector 分区（§十四）。
+// 18B 起：App 不写任何能力 switch；Ribbon / Inspector / StatusBar / Overlay / 快捷键 /
+// 右键菜单 / 光标全部从 Framework 注册表驱动。新增 OCR 只需 registerFeature。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PdfViewer, type PageOverlayData, type PdfViewerHandle } from './components/PdfViewer';
 import { Inspector } from './components/inspector';
 import {
-  MOUSE_MODE_LABELS,
   Ribbon,
   StatusBar,
   TitleBar,
-  type MouseMode,
-  type RibbonTab,
 } from './components/shell';
-import { ToastStack, useToasts } from './components/ui';
+import { ContextMenu, ToastStack, useToasts, type MenuItemView } from './components/ui';
 import {
   AiPanel,
   AnnotationPanel,
@@ -29,14 +26,23 @@ import {
   type WorkspaceKind,
 } from './components/workspace';
 import { EditorController, type EditorMode } from './editor/editorState';
+import {
+  desktopFramework,
+  initializeFramework,
+  type FrameworkActions,
+  type FrameworkContext,
+  type InspectorDocumentInfo,
+  type OverlayObject,
+} from './framework';
 import type { InspectorInfo, ObjectNodeInfo } from './ipc';
 import { applyTheme, loadTheme, saveTheme, watchSystemTheme, type ThemeMode } from './theme';
 import { WorkbenchViewModel, formatSize } from './viewmodels';
 import './index.css';
 
-/** 侧栏默认宽度（像素）：与 Design Token 保持一致。 */
+/** 初始化内置能力（幂等）：所有注册表在 App 渲染前就绪。 */
+initializeFramework();
+
 const NAV_DEFAULT_WIDTH = 224;
-/** 低于该视口宽度自动折叠侧栏（§十二 响应式）。 */
 const NAV_AUTO_COLLAPSE = 1280;
 
 export default function App() {
@@ -45,47 +51,38 @@ export default function App() {
   const viewerRef = useRef<PdfViewerHandle | null>(null);
 
   // ---- 纯 UI 状态：不进 Session / Document，不产生 Command ----
-  const [ribbonTab, setRibbonTab] = useState<RibbonTab>('home');
+  const [ribbonTab, setRibbonTab] = useState<string>('home');
   const [workspace, setWorkspace] = useState<WorkspaceKind>('pages');
   const [navCollapsed, setNavCollapsed] = useState(() => window.innerWidth <= NAV_AUTO_COLLAPSE);
   const [navWidth, setNavWidth] = useState(NAV_DEFAULT_WIDTH);
-  const [mode, setMode] = useState<MouseMode>('browse');
+  const [mode, setModeState] = useState<string>('browse');
   const [theme, setTheme] = useState<ThemeMode>(() => loadTheme());
-  /** 聚焦对象：只读导航高亮，不是 18-05 SelectionState 真值。 */
   const [focusedObject, setFocusedObject] = useState<ObjectNodeInfo | null>(null);
-  // 17 章：唯一 Controller（EditorState 是 Core 快照的投影，不是真值源）。
   const editor = useMemo(() => new EditorController(), []);
   const [editorState, setEditorState] = useState(() => editor.snapshot);
   const [inspector, setInspector] = useState<InspectorInfo | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
-
   useEffect(() => editor.subscribe(() => setEditorState(editor.snapshot)), [editor]);
-
   useEffect(() => {
     void viewModel.initialize();
   }, [viewModel]);
 
-  // ---- 主题：CSS Variables 切换，纯 UI 偏好（C-10） ----
   useEffect(() => {
     applyTheme(theme);
     saveTheme(theme);
   }, [theme]);
-
   useEffect(() => watchSystemTheme(() => applyTheme(theme)), [theme]);
-
-  // ---- 响应式：低宽度自动折叠侧栏，恢复宽度后展开 ----
   useEffect(() => {
-    const onResize = () => {
-      setNavCollapsed(window.innerWidth <= NAV_AUTO_COLLAPSE);
-    };
+    const onResize = () => setNavCollapsed(window.innerWidth <= NAV_AUTO_COLLAPSE);
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
-  // 切换文档：解绑旧会话、绑定新会话（DT-11），并清空 Inspector。
+  // 切文档：解绑旧会话、绑定新会话并清空投影（DT-11）。
   const lastDocumentRef = useRef<number | null>(null);
   useEffect(() => {
     const previous = lastDocumentRef.current;
@@ -93,15 +90,12 @@ export default function App() {
     lastDocumentRef.current = current;
     setFocusedObject(null);
     setInspector(null);
-    if (previous !== null && previous !== current) {
-      void editor.close(previous);
-    }
-    if (current !== null) {
-      void editor.open(current);
-    }
+    setContextMenu(null);
+    if (previous !== null && previous !== current) void editor.close(previous);
+    if (current !== null) void editor.open(current);
   }, [state.activeDocumentId, editor]);
 
-  // 主选对象变化 → 拉 Inspector（只读投影，不缓存 Object）。
+  // 主选对象变化 → 拉 Inspector（只读投影）。
   useEffect(() => {
     const primary = editorState.selection.primary;
     if (primary === null) {
@@ -110,16 +104,13 @@ export default function App() {
     }
     let cancelled = false;
     void editor.inspector(primary).then((info) => {
-      if (!cancelled) {
-        setInspector(info);
-      }
+      if (!cancelled) setInspector(info);
     });
     return () => {
       cancelled = true;
     };
   }, [editor, editorState.selection.primary, editorState.revision]);
 
-  // 对象树就绪后默认展开第一页，让 Workspace 一打开就有内容。
   useEffect(() => {
     const tree = state.objectTree;
     if (!tree) {
@@ -129,213 +120,16 @@ export default function App() {
     setExpandedNodes(tree.pages.length > 0 ? [`page:${tree.pages[0].page}`] : []);
   }, [state.objectTree]);
 
-  // 错误统一走轻提示；同一错误只提示一次，避免重渲染刷屏。
   const lastErrorRef = useRef('');
   useEffect(() => {
     if (state.error && state.error !== lastErrorRef.current) {
       lastErrorRef.current = state.error;
       push(state.error, 'error');
     }
-    if (!state.error) {
-      lastErrorRef.current = '';
-    }
+    if (!state.error) lastErrorRef.current = '';
   }, [state.error, push]);
 
-  // ---- 画布回调：全部稳定引用，避免 Viewer 反复重载 ----
-  const handlePageCount = useCallback(
-    (count: number) => viewModel.reportPageCount(count),
-    [viewModel],
-  );
-  const handlePageChange = useCallback((page: number) => viewModel.goToPage(page), [viewModel]);
-  const handleScroll = useCallback(
-    (page: number, scrollTop: number) => viewModel.reportScroll(page, scrollTop),
-    [viewModel],
-  );
-  const handleFitZoom = useCallback((zoom: number) => viewModel.reportFitZoom(zoom), [viewModel]);
-  const handleError = useCallback(
-    (message: string) => {
-      push(`渲染失败：${message}`, 'error');
-    },
-    [push],
-  );
-
-  // ---- 命令转发 ----
-  const goToPage = useCallback(
-    (page: number) => {
-      viewModel.goToPage(page);
-      viewerRef.current?.goToPage(page);
-    },
-    [viewModel],
-  );
-
-  // 指针在页面上移动：交给 Controller 命中（Hover 反馈）。
-  const handlePointerMove = useCallback(
-    (page: number, x: number, y: number, widthPx: number, rotation: number) => {
-      void editor.hitTest(page, x, y, widthPx, rotation);
-    },
-    [editor],
-  );
-
-  const handlePointerLeave = useCallback(() => editor.clearHover(), [editor]);
-
-  // 单击：先命中再写 Selection（命中失败则清空选择）。
-  const handlePageClick = useCallback(
-    (
-      page: number,
-      x: number,
-      y: number,
-      widthPx: number,
-      rotation: number,
-      mods: { ctrl: boolean; shift: boolean },
-    ) => {
-      void (async () => {
-        const hit = await editor.hitTest(page, x, y, widthPx, rotation);
-        if (hit) {
-          await editor.select(page, hit.object_id, {
-            multi: mods.ctrl || mods.shift,
-            ctrl: mods.ctrl,
-            shift: mods.shift,
-          });
-        } else {
-          await editor.clearSelection(page);
-        }
-      })();
-    },
-    [editor],
-  );
-
-  // 双击：命中文本对象后进入编辑（F2 等价）。
-  const handlePageDoubleClick = useCallback(
-    (page: number, x: number, y: number, widthPx: number, rotation: number) => {
-      void (async () => {
-        const hit = await editor.hitTest(page, x, y, widthPx, rotation);
-        if (!hit || hit.kind !== 'Text') {
-          return;
-        }
-        const info = await editor.inspector(hit.object_id);
-        await editor.select(page, hit.object_id);
-        await editor.beginEdit(hit.object_id, info?.text?.unicode ?? '');
-        editor.setMode('edit');
-      })();
-    },
-    [editor],
-  );
-
-  const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) {
-      void document.exitFullscreen();
-    } else {
-      void document.documentElement.requestFullscreen?.();
-    }
-  }, []);
-
-  // 快捷键：与 Ribbon 一一对应，不引入 Ribbon 之外的命令。
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      const modifier = event.ctrlKey || event.metaKey;
-      const key = event.key.toLowerCase();
-      if (event.key === 'F11') {
-        event.preventDefault();
-        toggleFullscreen();
-        return;
-      }
-      if (modifier && key === 'o') {
-        event.preventDefault();
-        void viewModel.openFile();
-        return;
-      }
-      if (modifier && key === 's') {
-        event.preventDefault();
-        if (event.shiftKey) {
-          void viewModel.saveAs();
-        } else {
-          void viewModel.save();
-        }
-        return;
-      }
-      if (modifier && key === 'z' && !event.shiftKey) {
-        event.preventDefault();
-        void viewModel.undo();
-        return;
-      }
-      if (modifier && (key === 'y' || (key === 'z' && event.shiftKey))) {
-        event.preventDefault();
-        void viewModel.redo();
-        return;
-      }
-      if (modifier && (event.key === '=' || event.key === '+')) {
-        event.preventDefault();
-        viewModel.zoomIn();
-        return;
-      }
-      if (modifier && event.key === '-') {
-        event.preventDefault();
-        viewModel.zoomOut();
-        return;
-      }
-      if (modifier && event.key === '0') {
-        event.preventDefault();
-        viewModel.setZoom(1);
-        return;
-      }
-      if (event.key === 'Escape' && editorState.editing.active) {
-        event.preventDefault();
-        void editor.cancel();
-        return;
-      }
-      if (event.key === 'F2' && editorState.capability.can_edit_text) {
-        event.preventDefault();
-        const primary = editorState.selection.primary;
-        if (primary !== null) {
-          void (async () => {
-            const info = await editor.inspector(primary);
-            await editor.beginEdit(primary, info?.text?.unicode ?? '');
-            editor.setMode('edit');
-          })();
-        }
-        return;
-      }
-      if (event.key === 'Enter' && editorState.editing.active) {
-        event.preventDefault();
-        void editor.commit();
-        return;
-      }
-      if (modifier && key === 'a' && editorState.documentId !== null) {
-        event.preventDefault();
-        void editor.selectAll(editorState.page);
-        return;
-      }
-      if (event.key === 'PageDown') {
-        event.preventDefault();
-        viewModel.nextPage();
-        return;
-      }
-      if (event.key === 'PageUp') {
-        event.preventDefault();
-        viewModel.prevPage();
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [viewModel, toggleFullscreen, editor, editorState]);
-
-  // ---- 投影：对象树 → 逐页 Overlay 数据 ----
-  const overlayPages = useMemo<Record<number, PageOverlayData>>(() => {
-    const map: Record<number, PageOverlayData> = {};
-    for (const page of state.objectTree?.pages ?? []) {
-      map[page.page] = {
-        pageWidth: page.page_width,
-        pageHeight: page.page_height,
-        objects: page.objects.map((object) => ({ objectId: object.object_id, bbox: object.bbox })),
-      };
-    }
-    return map;
-  }, [state.objectTree]);
-
-  const hasDocument = state.activeDocumentId !== null;
-  const zoomPercent = Math.round(state.zoom * 100);
-
-  // 状态栏十项：解析器状态来自对象树投影，OCR / AI / 内存暂无数据源。
+  // ---- FrameworkContext：全部来自投影，无业务真值 ----
   const parserText = state.objectTreeLoading
     ? '解析中'
     : state.objectTreeError
@@ -345,18 +139,196 @@ export default function App() {
           ? `警告 ${state.objectTree.warnings.length}`
           : '正常'
         : '—';
-
   const saveText = state.dirty
     ? '未保存'
     : state.lastSavedAt
       ? `已保存 ${state.lastSavedAt}`
       : '—';
 
-  const selectionText =
-    state.selectedPages.length === 0
-      ? 'Selection(None)'
-      : `Selection(Page ${state.selectedPages.join(',')})`;
+  const ctx = useMemo<FrameworkContext>(() => ({
+    mode,
+    theme,
+    hasDocument: state.activeDocumentId !== null,
+    page: state.currentPage,
+    pageCount: state.pageCount,
+    zoomPercent: Math.round(state.zoom * 100),
+    capability: editorState.capability,
+    selection: editorState.selection,
+    editing: editorState.editing,
+    hover: editorState.hover,
+    canUndo: state.canUndo,
+    canRedo: state.canRedo,
+    dirty: state.dirty,
+    pendingPatches: editorState.pendingPatches,
+    revision: editorState.revision,
+    parserText,
+    saveText,
+    taskEvent: state.taskEvent,
+    error: state.error,
+  }), [
+    mode, theme, state.activeDocumentId, state.currentPage, state.pageCount, state.zoom,
+    editorState.capability, editorState.selection, editorState.editing, editorState.hover,
+    state.canUndo, state.canRedo, state.dirty, editorState.pendingPatches, editorState.revision,
+    parserText, saveText, state.taskEvent, state.error,
+  ]);
 
+  // ---- FrameworkActions：意图转发，注册表只声明不持有 ViewModel ----
+  const refreshEditor = useCallback(() => {
+    const id = state.activeDocumentId;
+    if (id !== null) void editor.refresh(id);
+  }, [editor, state.activeDocumentId]);
+
+  const actions = useMemo<FrameworkActions>(() => ({
+    open: () => void viewModel.openFile(),
+    save: () => void viewModel.save().then(refreshEditor),
+    saveAs: () => void viewModel.saveAs().then(refreshEditor),
+    undo: () => void viewModel.undo().then(refreshEditor),
+    redo: () => void viewModel.redo().then(refreshEditor),
+    rotate: (delta) => void viewModel.rotate(delta),
+    deletePages: () => void viewModel.deleteSelectedPages(),
+    zoomIn: () => viewModel.zoomIn(),
+    zoomOut: () => viewModel.zoomOut(),
+    fitWidth: () => viewerRef.current?.fitWidth(),
+    actualSize: () => viewModel.setZoom(1),
+    fullscreen: () => {
+      if (document.fullscreenElement) void document.exitFullscreen();
+      else void document.documentElement.requestFullscreen?.();
+    },
+    goToPage: (page) => {
+      viewModel.goToPage(page);
+      viewerRef.current?.goToPage(page);
+    },
+    nextPage: () => {
+      viewModel.nextPage();
+      viewerRef.current?.goToPage(Math.min(state.pageCount, state.currentPage + 1));
+    },
+    prevPage: () => {
+      viewModel.prevPage();
+      viewerRef.current?.goToPage(Math.max(1, state.currentPage - 1));
+    },
+    setMode: (toolId) => {
+      const tool = desktopFramework.registries.tools.get(toolId);
+      if (!tool?.enabled(ctx)) return;
+      setModeState(toolId);
+      editor.setMode(toolId as EditorMode);
+    },
+    setTheme: (next) => setTheme(next),
+    beginEdit: () => {
+      const primary = editorState.selection.primary;
+      if (primary === null) return;
+      void (async () => {
+        const info = await editor.inspector(primary);
+        await editor.beginEdit(primary, info?.text?.unicode ?? '');
+        setModeState('edit');
+        editor.setMode('edit');
+      })();
+    },
+    commit: () => void editor.commit(),
+    cancel: () => void editor.cancel(),
+    replaceText: (text) => void editor.commit(text),
+    selectAll: () => void editor.selectAll(editorState.page),
+    clearSelection: () => void editor.clearSelection(editorState.page),
+  }), [viewModel, editor, refreshEditor, state.pageCount, state.currentPage, editorState.selection.primary, editorState.page, ctx]);
+
+  // ---- 画布回调：命中走 Controller，不自行解析 ----
+  const handlePageCount = useCallback((count: number) => viewModel.reportPageCount(count), [viewModel]);
+  const handlePageChange = useCallback((page: number) => viewModel.goToPage(page), [viewModel]);
+  const handleScroll = useCallback((page: number, scrollTop: number) => viewModel.reportScroll(page, scrollTop), [viewModel]);
+  const handleFitZoom = useCallback((zoom: number) => viewModel.reportFitZoom(zoom), [viewModel]);
+  const handleError = useCallback((message: string) => push(`渲染失败：${message}`, 'error'), [push]);
+
+  const handlePointerMove = useCallback((page: number, x: number, y: number, widthPx: number, rotation: number) => {
+    void editor.hitTest(page, x, y, widthPx, rotation);
+  }, [editor]);
+  const handlePointerLeave = useCallback(() => editor.clearHover(), [editor]);
+
+  const handlePageClick = useCallback((
+    page: number, x: number, y: number, widthPx: number, rotation: number,
+    mods: { ctrl: boolean; shift: boolean },
+  ) => {
+    void (async () => {
+      const hit = await editor.hitTest(page, x, y, widthPx, rotation);
+      if (hit) {
+        await editor.select(page, hit.object_id, { multi: mods.ctrl || mods.shift, ctrl: mods.ctrl, shift: mods.shift });
+      } else {
+        await editor.clearSelection(page);
+      }
+    })();
+  }, [editor]);
+
+  const handlePageDoubleClick = useCallback((page: number, x: number, y: number, widthPx: number, rotation: number) => {
+    void (async () => {
+      const hit = await editor.hitTest(page, x, y, widthPx, rotation);
+      if (!hit || hit.kind !== 'Text') return;
+      const info = await editor.inspector(hit.object_id);
+      await editor.select(page, hit.object_id);
+      await editor.beginEdit(hit.object_id, info?.text?.unicode ?? '');
+      setModeState('edit');
+      editor.setMode('edit');
+    })();
+  }, [editor]);
+
+  // ---- 快捷键：遍历 ShortcutRegistry，无 switch ----
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      const parts: string[] = [];
+      if (event.ctrlKey || event.metaKey) parts.push('ctrl');
+      if (event.shiftKey) parts.push('shift');
+      if (event.altKey) parts.push('alt');
+      let key = event.key.toLowerCase();
+      if (key === ' ') key = 'space';
+      parts.push(key);
+      const combo = parts.join('+');
+      const bindings = desktopFramework.registries.shortcuts.sorted();
+      for (const binding of bindings) {
+        if (binding.combo !== combo) continue;
+        if (binding.enabled && !binding.enabled(ctx)) continue;
+        event.preventDefault();
+        binding.run(actions);
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [ctx, actions]);
+
+  // ---- 投影：对象树 → Overlay 几何（不是 Object 真值） ----
+  const overlayPages = useMemo<Record<number, PageOverlayData>>(() => {
+    const map: Record<number, PageOverlayData> = {};
+    for (const page of state.objectTree?.pages ?? []) {
+      const objects: OverlayObject[] = page.objects.map((object) => ({
+        objectId: object.object_id,
+        bbox: object.bbox,
+      }));
+      map[page.page] = {
+        pageWidth: page.page_width,
+        pageHeight: page.page_height,
+        objects,
+      };
+    }
+    return map;
+  }, [state.objectTree]);
+
+  const hasDocument = state.activeDocumentId !== null;
+
+  // ---- 右键菜单项：来自 ContextMenuRegistry ----
+  const menuItems = useMemo<MenuItemView[]>(() => {
+    if (!contextMenu) return [];
+    return desktopFramework.contextItems(ctx, actions) as MenuItemView[];
+  }, [contextMenu, ctx, actions]);
+
+  const inspectorDocument: InspectorDocumentInfo = useMemo(() => ({
+    title: state.activeTitle,
+    author: state.author,
+    pageCount: state.pageCount,
+    fileSize: state.fileSize,
+    path: state.sourcePath,
+    dirty: state.dirty,
+    lastSavedAt: state.lastSavedAt,
+    parserText,
+  }), [state.activeTitle, state.author, state.pageCount, state.fileSize, state.sourcePath, state.dirty, state.lastSavedAt, parserText]);
+
+  // 工作区面板：分类固定十类，未来分类由 workspaces.ts 的 enabled 控制。
   const activePanel = (() => {
     switch (workspace) {
       case 'pages':
@@ -388,33 +360,16 @@ export default function App() {
               )
             }
             onFocusObject={setFocusedObject}
-            onLocatePage={goToPage}
+            onLocatePage={(page) => actions.goToPage(page)}
           />
         );
-      case 'bookmarks':
-        return <BookmarksPanel />;
-      case 'outline':
-        return <OutlinePanel />;
-      case 'attachments':
-        return <AttachmentsPanel />;
-      case 'ocr':
-        return <OcrPanel />;
-      case 'annotation':
-        return <AnnotationPanel />;
-      case 'ai':
-        return <AiPanel />;
-      default:
-        return <PagesPanel
-          hasDocument={hasDocument}
-          pageOrder={state.pageOrder}
-          rotations={state.rotations}
-          selectedPages={state.selectedPages}
-          currentPage={state.currentPage}
-          layoutRevision={state.layoutRevision}
-          onSelectPages={(pages, selectMode) => void viewModel.selectPages(pages, selectMode)}
-          onMovePage={(from, to) => void viewModel.movePage(from, to)}
-          onClearSelection={() => void viewModel.clearSelection()}
-        />;
+      case 'bookmarks': return <BookmarksPanel />;
+      case 'outline': return <OutlinePanel />;
+      case 'attachments': return <AttachmentsPanel />;
+      case 'ocr': return <OcrPanel />;
+      case 'annotation': return <AnnotationPanel />;
+      case 'ai': return <AiPanel />;
+      default: return null;
     }
   })();
 
@@ -430,32 +385,11 @@ export default function App() {
       />
 
       <Ribbon
+        ctx={ctx}
+        actions={actions}
         activeTab={ribbonTab}
         onTabChange={setRibbonTab}
-        hasDocument={hasDocument}
-        pageCount={state.pageCount}
-        canUndo={state.canUndo}
-        canRedo={state.canRedo}
-        mode={mode}
-        onModeChange={(next) => {
-          setMode(next);
-          editor.setMode(next as EditorMode);
-        }}
         theme={theme}
-        onThemeChange={setTheme}
-        onOpen={() => void viewModel.openFile()}
-        onSave={() => void viewModel.save()}
-        onSaveAs={() => void viewModel.saveAs()}
-        onUndo={() => void viewModel.undo()}
-        onRedo={() => void viewModel.redo()}
-        onRotate={(delta) => void viewModel.rotate(delta)}
-        onDeletePages={() => void viewModel.deleteSelectedPages()}
-        onZoomIn={() => viewModel.zoomIn()}
-        onZoomOut={() => viewModel.zoomOut()}
-        onFitWidth={() => viewerRef.current?.fitWidth()}
-        onActualSize={() => viewModel.setZoom(1)}
-        onFullscreen={toggleFullscreen}
-        capability={editorState.capability}
       />
 
       <div className="dw-main">
@@ -498,62 +432,38 @@ export default function App() {
               hoverObjectId={editorState.hover?.object_id ?? null}
               selectedObjectIds={editorState.selection.selected}
               editingObjectId={editorState.editing.objectId}
-              mode={mode}
+              cursorKind={desktopFramework.resolveCursor(mode)}
               onPagePointerMove={handlePointerMove}
               onPagePointerLeave={handlePointerLeave}
               onPageClick={handlePageClick}
               onPageDoubleClick={handlePageDoubleClick}
+              onPageContextMenu={(x, y) => setContextMenu({ x, y })}
             />
             <ToastStack toasts={toasts} onDismiss={dismiss} />
           </div>
         </div>
 
         <Inspector
+          ctx={ctx}
+          actions={actions}
           hasDocument={hasDocument}
-          document={{
-            title: state.activeTitle,
-            author: state.author,
-            pageCount: state.pageCount,
-            fileSize: state.fileSize,
-            path: state.sourcePath,
-            dirty: state.dirty,
-            lastSavedAt: state.lastSavedAt,
-            parserText,
-          }}
+          document={inspectorDocument}
           inspector={inspector}
-          focusedPageRotation={
-            inspector ? (state.rotations[inspector.page] ?? 0) : null
-          }
-          editing={editorState.editing.active}
-          onBeginEdit={() => {
-            const primary = editorState.selection.primary;
-            if (primary !== null) {
-              void editor.beginEdit(primary, inspector?.text?.unicode ?? '');
-            }
-          }}
-          onCommit={() => void editor.commit()}
-          onCancel={() => void editor.cancel()}
-          onReplaceText={(text) => void editor.commit(text)}
+          focusedPageRotation={inspector ? (state.rotations[inspector.page] ?? 0) : null}
           formatSize={(bytes) => (bytes > 0 ? formatSize(bytes) : '—')}
         />
       </div>
 
-      <StatusBar
-        zoomPercent={zoomPercent}
-        page={state.currentPage}
-        pageCount={state.pageCount}
-        selectionText={selectionText}
-        modeText={MOUSE_MODE_LABELS[mode]}
-        dirty={state.dirty}
-        ocrText="OCR 未接入"
-        aiText="AI 未接入"
-        memoryText="—"
-        parserText={parserText}
-        saveText={saveText}
-        taskEvent={state.taskEvent}
-        error={state.error}
-        onGoToPage={goToPage}
-      />
+      <StatusBar ctx={ctx} actions={actions} taskEvent={state.taskEvent} error={state.error} />
+
+      {contextMenu ? (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          items={menuItems}
+          onClose={() => setContextMenu(null)}
+        />
+      ) : null}
     </div>
   );
 }

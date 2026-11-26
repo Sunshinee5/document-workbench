@@ -89,8 +89,10 @@ interface PdfViewerProps {
   selectedObjectIds?: number[];
   /** 正在编辑的对象 id：显示 Caret。 */
   editingObjectId?: number | null;
-  /** 鼠标模式：决定画布光标。 */
-  mode?: string;
+  /** 光标种类：唯一来源是 CursorManager.resolve(toolId)，组件不得自行设置。 */
+  cursorKind?: string;
+  /** 右键：交给 App 从 ContextMenuRegistry 收集菜单项。 */
+  onPageContextMenu?: (x: number, y: number) => void;
   /** 指针在页面内移动：交给 Controller 做命中测试。 */
   onPagePointerMove?: (
     page: number,
@@ -229,7 +231,8 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     hoverObjectId = null,
     selectedObjectIds = [],
     editingObjectId = null,
-    mode = 'browse',
+    cursorKind = 'arrow',
+    onPageContextMenu,
     onPagePointerMove,
     onPagePointerLeave,
     onPageClick,
@@ -449,7 +452,7 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   }
 
   return (
-    <div className="pdf-viewer" ref={containerRef} data-mode={mode} onScroll={handleScroll}>
+    <div className="pdf-viewer" ref={containerRef} data-cursor={cursorKind} onScroll={handleScroll}>
       <div className="pdf-pages">
         {pageBoxes.map((box, index) => (
           <div
@@ -469,6 +472,10 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               );
             }}
             onMouseLeave={() => onPagePointerLeave?.()}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onPageContextMenu?.(event.clientX, event.clientY);
+            }}
             onClick={(event) => {
               // 页选择（Feature-02）与对象选择（17 章）并行：页级仍写 Session.selection.pages。
               const selectMode = event.shiftKey

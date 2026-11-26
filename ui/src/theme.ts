@@ -61,3 +61,40 @@ export function watchSystemTheme(onChange: () => void): () => void {
   media.addEventListener('change', listener);
   return () => media.removeEventListener('change', listener);
 }
+
+// ---------------------------------------------------------------------------
+// 18B ThemeManager（规范 18 AD-16）：统一 Theme Token 名册。
+//
+// 色值仍在 tokens.css 的 CSS Variables 里（C-7），这里只登记 token 名与用途，
+// 禁止组件写死颜色。ThemeManager 不持有业务状态，只提供 token 查询。
+// ---------------------------------------------------------------------------
+
+interface ThemeTokenLike {
+  id: string;
+  cssVar: string;
+  usage: string;
+}
+
+class ThemeManager {
+  private readonly tokens = new Map<string, ThemeTokenLike>();
+
+  /** 由 registerFeature 调用，登记 token 名册；重复 id 忽略（幂等）。 */
+  registerToken(token: ThemeTokenLike): void {
+    if (!this.tokens.has(token.id)) {
+      this.tokens.set(token.id, token);
+    }
+  }
+
+  /** 已登记 token（只读快照）。 */
+  list(): readonly ThemeTokenLike[] {
+    return [...this.tokens.values()];
+  }
+
+  /** 按 id 取 CSS 变量名。 */
+  cssVar(id: string): string | undefined {
+    return this.tokens.get(id)?.cssVar;
+  }
+}
+
+/** 全项目唯一 ThemeManager。 */
+export const themeManager = new ThemeManager();

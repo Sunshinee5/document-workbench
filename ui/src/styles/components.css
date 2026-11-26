@@ -368,21 +368,80 @@
   background: var(--dw-surface-3);
 }
 
-/* 鼠标模式统一由容器决定光标，模块不得自行改（§十）。 */
-.pdf-viewer[data-mode='select'] {
+/* 18B AD-14：光标唯一来源 CursorManager → data-cursor，模块不得自行设置。 */
+.pdf-viewer[data-cursor='cross'] {
   cursor: crosshair;
 }
 
-.pdf-viewer[data-mode='edit'] {
+.pdf-viewer[data-cursor='ibeam'] {
   cursor: text;
 }
 
-.pdf-viewer[data-mode='ocr'] {
+.pdf-viewer[data-cursor='ocr'] {
   cursor: cell;
 }
 
-.pdf-viewer[data-mode='annotation'] {
+.pdf-viewer[data-cursor='annotation'] {
   cursor: copy;
+}
+
+.pdf-viewer[data-cursor='ai'] {
+  cursor: help;
+}
+
+.pdf-viewer[data-cursor='move'] {
+  cursor: move;
+}
+
+.pdf-viewer[data-cursor='resize'] {
+  cursor: nwse-resize;
+}
+
+.pdf-viewer[data-cursor='rotate'] {
+  cursor: grab;
+}
+
+/* 右键菜单（18B ContextMenu Framework）。 */
+.dw-context-menu {
+  position: fixed;
+  z-index: 90;
+  min-width: 168px;
+  padding: 4px;
+  border: 1px solid var(--dw-border);
+  border-radius: 6px;
+  background: var(--dw-surface);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  color: var(--dw-text);
+}
+
+.dw-context-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dw-context-item:hover:not(:disabled) {
+  background: var(--dw-accent-soft);
+}
+
+.dw-context-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.dw-context-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--dw-border);
 }
 
 .pdf-pages {
