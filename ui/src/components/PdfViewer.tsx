@@ -37,6 +37,12 @@ const PAGE_GAP = 16;
 /** 拖拽超过该像素数才算框选，低于阈值仍按单击处理。 */
 const FRAME_THRESHOLD_PX = 4;
 
+/**
+ * 单击选择的延迟窗口（毫秒）：必须大于浏览器判定双击的最大间隔，
+ * 这样双击的第二下到达时，第一下挂起的单击 select 还没发出。
+ */
+const DOUBLE_CLICK_GUARD_MS = 260;
+
 /** 框选矩形：相对当前页槽的百分比坐标（0..100）。 */
 interface FrameRect {
   page: number;
@@ -378,6 +384,12 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   const [frameRect, setFrameRect] = useState<FrameRect | null>(null);
   /** 框选结束后短暂吞掉 click，避免拖拽被当成单击选择。 */
   const suppressClickUntilRef = useRef(0);
+  /**
+   * 单击选择挂起定时器：单击不立即发 select，而是等过双击窗口再执行。
+   * 双击到达时 clearTimeout，避免第一次 click 的异步 select 与 dblclick 的
+   * select → beginEdit 竞态，把刚建立的主选覆盖掉导致编辑态建不起来。
+   */
+  const clickSelectionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** Overlay 手柄 Hover 的临时光标覆盖；始终通过 data-cursor 唯一出口下发。 */
   const [cursorOverride, setCursorOverride] = useState<string | null>(null);
 
@@ -427,6 +439,11 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     })();
     return () => {
       cancelled = true;
+      // 卸载时取消挂起的单击选择，避免定时器在组件销毁后调用父组件回调。
+      if (clickSelectionTimerRef.current !== null) {
+        window.clearTimeout(clickSelectionTimerRef.current);
+        clickSelectionTimerRef.current = null;
+      }
       // 保存成功后要用新字节重建 PDF.js 文档，旧任务必须先销毁以免 worker 泄漏。
       void loadingTaskRef.current?.destroy();
       loadingTaskRef.current = null;
@@ -693,29 +710,42 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
             }}
             onClick={(event) => {
               // 框选结束后的 click 是浏览器补发的，不能再写一次单击选择。
-              // detail > 1 是双击的第二次 click：它的异步选择会与 onDoubleClick 的
-              // select → beginEdit 竞态，甚至把刚建立的选中清掉，必须跳过。
+              // detail > 1 是双击的第二次 click：交给 onDoubleClick 处理。
               if (event.detail > 1 || Date.now() < suppressClickUntilRef.current) {
                 return;
               }
-              // 页选择（Feature-02）与对象选择（17 章）并行：页级仍写 Session.selection.pages。
+              // 先把挂起的单击选择取消：每个 click 只保留最后一次的坐标。
+              if (clickSelectionTimerRef.current !== null) {
+                window.clearTimeout(clickSelectionTimerRef.current);
+                clickSelectionTimerRef.current = null;
+              }
+              // 快照事件字段：定时器回调用的是异步执行时的合成事件，字段可能被回收。
+              const pageNumber = box.original;
+              const rotation = box.rotation;
               const selectMode = event.shiftKey
                 ? 'range'
                 : event.ctrlKey || event.metaKey
                   ? 'toggle'
                   : 'replace';
-              onSelectPage(index + 1, selectMode);
+              const mods = { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey };
               const rect = event.currentTarget.getBoundingClientRect();
-              onPageClick?.(
-                box.original,
-                event.clientX - rect.left,
-                event.clientY - rect.top,
-                rect.width,
-                box.rotation,
-                { ctrl: event.ctrlKey || event.metaKey, shift: event.shiftKey },
-              );
+              const x = event.clientX - rect.left;
+              const y = event.clientY - rect.top;
+              const widthPx = rect.width;
+              // 单击延后到双击窗口之后：若这次点击其实是双击的第一下，
+              // onDoubleClick 会取消这个定时器，select → beginEdit 就不会被竞态覆盖。
+              clickSelectionTimerRef.current = window.setTimeout(() => {
+                clickSelectionTimerRef.current = null;
+                onSelectPage(pageNumber, selectMode);
+                onPageClick?.(pageNumber, x, y, widthPx, rotation, mods);
+              }, DOUBLE_CLICK_GUARD_MS);
             }}
             onDoubleClick={(event) => {
+              // 取消挂起的单击选择：双击链独占 select → beginEdit。
+              if (clickSelectionTimerRef.current !== null) {
+                window.clearTimeout(clickSelectionTimerRef.current);
+                clickSelectionTimerRef.current = null;
+              }
               const rect = event.currentTarget.getBoundingClientRect();
               onPageDoubleClick?.(
                 box.original,
