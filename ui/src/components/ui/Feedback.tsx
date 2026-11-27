@@ -3,6 +3,7 @@
 // 全部复用 18B Framework，不新增第二套：Progress / Skeleton / ErrorPanel / Tooltip。
 // ErrorPanel 替代浏览器 alert（禁止 alert）；Tooltip 统一 title + CSS。
 import type { ReactNode } from 'react';
+import { Icon } from './Icon';
 
 /** 统一进度条（OCR Running / Save / Loading 共用）。 */
 export function Progress({
@@ -47,7 +48,7 @@ export function ErrorPanel({
   if (!message) return null;
   return (
     <div className="dw-error-panel" role="alert">
-      <span className="dw-error-icon" aria-hidden="true">⚠</span>
+      <Icon name="warning" className="dw-error-icon" />
       <span>{message}</span>
       {onRetry ? (
         <button type="button" className="dw-error-retry" onClick={onRetry}>重试</button>

@@ -40,16 +40,19 @@
   /* Fluent 阴影分层：菜单浮层与纸张各自独立，组件不再写死 rgba。 */
   --dw-shadow-menu: 0 8px 24px rgba(16, 24, 40, 0.18);
   --dw-shadow-page: 0 1px 4px rgba(16, 24, 40, 0.16);
+  /* 纸面上的半透明小标签底色：纸张恒为白色，两套主题共用同一值。 */
+  --dw-paper-chip: rgba(32, 43, 58, 0.06);
 
   /* Ribbon 统一尺寸（规范 26 第一部分 §1）：图标 / 文字 / 按钮 / 间距全部 Token 化。 */
   --dw-icon-stacked: 32px;
   --dw-icon-quick: 14px;
   --dw-font-ribbon: 12px;
   --dw-btn-stacked-w: 64px;
-  --dw-btn-stacked-h: 48px;
+  /* 92px Ribbon = 页签 26 + 主体 65 + 边框 1；按钮/分组高度必须容纳 32px 图标 + 12px 文字。 */
+  --dw-btn-stacked-h: 52px;
   --dw-ribbon-tabs-h: 26px;
   --dw-ribbon-body-h: 65px;
-  --dw-group-body-h: 48px;
+  --dw-group-body-h: 52px;
   --dw-group-gap: 8px;
   --dw-quick-btn-w: 28px;
   --dw-quick-btn-h: 22px;

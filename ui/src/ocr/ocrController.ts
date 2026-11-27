@@ -51,6 +51,9 @@ function emptySession(): OcrSessionInfo {
 
 /** OCR 唯一 Controller：组件只调它，不直接 invoke。 */
 export class OcrController {
+  /** 轮询与启动命令的最长等待：超过即判定引擎无响应。 */
+  private static readonly POLL_TIMEOUT_MS = 10 * 60 * 1000;
+
   private stateValue: OcrState = {
     session: emptySession(),
     providers: [],
@@ -60,6 +63,8 @@ export class OcrController {
     activeIndex: null,
   };
   private listeners: Array<() => void> = [];
+  /** 轮询互斥：同一时刻只允许一个识别任务，避免重复点击叠加出多条轮询。 */
+  private running = false;
 
   get snapshot(): OcrState {
     return { ...this.stateValue };
@@ -112,12 +117,27 @@ export class OcrController {
 
   /** 启动识别：pages 空为全文，region 为区域限定。 */
   async start(documentId: number, pages: number[], region: [number, number, number, number] | null): Promise<void> {
+    // 重入保护：已有任务在跑时直接拒绝，不叠加第二条轮询。
+    if (this.running) {
+      this.update({ error: '已有 OCR 任务在执行，请先等待完成或取消' });
+      return;
+    }
+    this.running = true;
+    const startedAt = Date.now();
     try {
       let done = false;
       // 启动命令在 Core 分页执行；这里只轮询只读投影，不自己推进状态机。
       const task = ocrStart(documentId, pages, region, this.stateValue.provider)
         .finally(() => { done = true; });
+      // 超时分支会提前 return，此时 task 仍可能在之后拒绝：先挂空 catch，避免 unhandled rejection。
+      void task.catch(() => undefined);
+      let timedOut = false;
       while (!done) {
+        // 超时保护：引擎挂死时不能无限轮询下去。
+        if (Date.now() - startedAt > OcrController.POLL_TIMEOUT_MS) {
+          timedOut = true;
+          break;
+        }
         await delay(120);
         try {
           const session = await ocrStatus();
@@ -129,10 +149,18 @@ export class OcrController {
           // 浏览器预览：保持当前投影，最终 error 由 ocrStart 返回。
         }
       }
-      const session = await task;
-      this.update({ session, error: session.error || '' });
+      if (timedOut) {
+        this.update({ error: 'OCR 超时：引擎未在预期时间内返回，请检查引擎后重试' });
+        return;
+      }
+      // 终态已到但启动命令仍未返回时，不让界面一直等：超时即回落为一次状态刷新。
+      const session = await Promise.race([task, delay(OcrController.POLL_TIMEOUT_MS).then(() => null)]);
+      if (session) this.update({ session, error: session.error || '' });
+      else await this.refresh();
     } catch (error) {
       this.update({ error: toMessage(error) });
+    } finally {
+      this.running = false;
     }
   }
 

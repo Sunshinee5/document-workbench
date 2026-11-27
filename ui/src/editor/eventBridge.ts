@@ -46,6 +46,8 @@ export class EventBridge {
   private listeners: Array<() => void> = [];
   /** 正在进行的保存（本地翻转 Saving，命令返回后由事件纠正）。 */
   private pendingSave = false;
+  /** 本次 Saving 的起始时刻：事件迟迟不到时用于超时回落。 */
+  private savingSince = 0;
 
   get snapshot(): EventFeedback {
     return { ...this.value };
@@ -66,7 +68,22 @@ export class EventBridge {
   /** 发起保存前调用：UI 立即显示 Saving（C-5）。 */
   markSaving(): void {
     this.pendingSave = true;
+    this.savingSince = Date.now();
     this.update({ saveFeedback: 'saving' });
+  }
+
+  /**
+   * 保存命令已返回时调用：清掉本地 pending。
+   *
+   * `save()` 会把错误吞进 state.error，返回的 Promise 恒为 resolve，所以不能按返回值判成败；
+   * 这里只用「保存后是否仍为脏」决定是否回落，真正的成败仍由 SaveCompleted/SaveFailed 事件纠正。
+   * `dirty === true` 时回落 idle（状态栏读真实脏标记），避免伪造失败文案。
+   */
+  settleSave(dirty: boolean): void {
+    if (!this.pendingSave) return;
+    this.pendingSave = false;
+    if (this.value.saveFeedback !== 'saving') return;
+    this.update({ saveFeedback: dirty ? 'idle' : 'success' });
   }
 
   /** 拉取一次增量事件 + 运行态投影。 */
@@ -98,6 +115,11 @@ export class EventBridge {
         }
       }
       // 本地 pending 但事件尚未到达：保持 Saving，不误报成功。
+      // 超过 5s 仍无事件则回落（后端 Clean 时直接跳过写盘，本就不发 SaveStarted/SaveCompleted）。
+      if (this.pendingSave && Date.now() - this.savingSince > 5000) {
+        this.pendingSave = false;
+        if (saveFeedback === 'saving') saveFeedback = 'idle';
+      }
       if (this.pendingSave && saveFeedback !== 'failed') {
         saveFeedback = 'saving';
       }

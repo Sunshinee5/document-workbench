@@ -27,6 +27,7 @@
   justify-content: center;
   width: 100%;
   flex: 0 0 auto;
+  overflow: visible;
 }
 
 .dw-nav-item {
@@ -41,6 +42,13 @@
   color: var(--dw-text-muted);
   font-size: 14px;
   cursor: pointer;
+  overflow: visible;
+}
+
+/* 图标是文本字形：1 倍行高会切掉 emoji 的上下笔画，禁止压缩。 */
+.dw-nav-item .dw-icon {
+  flex: 0 0 auto;
+  line-height: 1.4;
 }
 
 .dw-nav-item:hover:not(:disabled) {

@@ -42,7 +42,7 @@ export function StatusBar({ ctx, actions, taskEvent, error }: StatusBarProps) {
   const renderGroup = (group: StatusGroup) => (
     <div className={`dw-status-${group}`} data-status-group={group}>
       {groups[group].map((item, index) => (
-        <span key={item.id} className="dw-status-slot">
+        <span key={item.id} className="dw-status-slot" data-status-id={item.id}>
           {index > 0 ? <span className="dw-status-sep" /> : null}
           {item.render
             ? item.render(ctx, actions)

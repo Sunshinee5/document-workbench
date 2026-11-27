@@ -119,6 +119,8 @@ export interface PageOverlayData {
   objects: OverlayObject[];
   /** 第19章：本页 OCR 结果投影（Overlay BBox + confidence）。 */
   ocrResults?: Array<{
+    /** 全局 OCR 结果序号，Overlay 审核 / 应用回调必须使用。 */
+    resultIndex: number;
     page: number;
     bbox: [number, number, number, number];
     confidence: number;
@@ -691,7 +693,9 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
             }}
             onClick={(event) => {
               // 框选结束后的 click 是浏览器补发的，不能再写一次单击选择。
-              if (Date.now() < suppressClickUntilRef.current) {
+              // detail > 1 是双击的第二次 click：它的异步选择会与 onDoubleClick 的
+              // select → beginEdit 竞态，甚至把刚建立的选中清掉，必须跳过。
+              if (event.detail > 1 || Date.now() < suppressClickUntilRef.current) {
                 return;
               }
               // 页选择（Feature-02）与对象选择（17 章）并行：页级仍写 Session.selection.pages。

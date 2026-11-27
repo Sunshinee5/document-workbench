@@ -76,9 +76,7 @@ function renderSelectionOverlay(props: OverlayRenderProps) {
       >
         {primary ? <span className="dw-primary-tag">主选</span> : null}
         {hovered && props.hoverKind ? (
-          <span className="dw-hover-tag">
-            {props.hoverKind}{props.hoverPriority ? ` · ${props.hoverPriority}` : ''}
-          </span>
+          <span className="dw-hover-tag">{props.hoverKind}</span>
         ) : null}
         {editing ? <span className="dw-caret" /> : null}
         {selected ? (
@@ -185,18 +183,20 @@ function renderOcrOverlay(props: OverlayRenderProps) {
   const reviews = props.ocrReviews ?? [];
   const canApply = props.ocrCanApply ?? [];
   const activeIndex = props.ocrActiveIndex ?? null;
-  return visible.map((result, index) => {
+  return visible.map((result) => {
+    // 投影里的 resultIndex 是全局序号：reviews / canApply / 回调都按它取值。
+    const globalIndex = result.resultIndex;
     const box = projectBox(result.bbox, props.pageWidth, props.pageHeight, props.rotation);
-    const review = reviews.find((item) => item.result_index === index);
+    const review = reviews.find((item) => item.result_index === globalIndex);
     const accepted = review?.decision === '已接受';
     const rejected = review?.decision === '已拒绝';
     const classes = ['dw-ocr-box'];
-    if (activeIndex === index) classes.push('is-active');
+    if (activeIndex === globalIndex) classes.push('is-active');
     if (rejected) classes.push('is-rejected');
-    const applyDisabled = !canApply[index];
+    const applyDisabled = !canApply[globalIndex];
     return (
       <div
-        key={`ocr-${result.page}-${index}`}
+        key={`ocr-${result.page}-${globalIndex}`}
         className={classes.join(' ')}
         title={`${result.text} · ${Math.round(result.confidence * 100)}% · ${review?.decision ?? '待审核'}`}
         style={{
@@ -210,7 +210,7 @@ function renderOcrOverlay(props: OverlayRenderProps) {
         onPointerDown={(event) => event.stopPropagation()}
         onClick={(event) => {
           event.stopPropagation();
-          props.onOcrActivate?.(index);
+          props.onOcrActivate?.(globalIndex);
         }}
       >
         <span className="dw-ocr-box-tag">{Math.round(result.confidence * 100)}%</span>
@@ -227,7 +227,7 @@ function renderOcrOverlay(props: OverlayRenderProps) {
             onMouseDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.stopPropagation();
-              props.onOcrDecide?.(index, true);
+              props.onOcrDecide?.(globalIndex, true);
             }}
           >
             接受
@@ -240,7 +240,7 @@ function renderOcrOverlay(props: OverlayRenderProps) {
             onMouseDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.stopPropagation();
-              props.onOcrDecide?.(index, false);
+              props.onOcrDecide?.(globalIndex, false);
             }}
           >
             拒绝
@@ -258,7 +258,7 @@ function renderOcrOverlay(props: OverlayRenderProps) {
             onMouseDown={(event) => event.preventDefault()}
             onClick={(event) => {
               event.stopPropagation();
-              if (!applyDisabled) props.onOcrApply?.(index);
+              if (!applyDisabled) props.onOcrApply?.(globalIndex);
             }}
           >
             应用
@@ -273,6 +273,11 @@ function renderOcrOverlay(props: OverlayRenderProps) {
 function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: InspectorRenderProps) {
   const text = inspector?.text ?? null;
   const [draft, setDraft] = useState('');
+  const editingActive = ctx.editing.active;
+  // 进入编辑态时把对象原文灌进草稿：否则草稿为空，直接回车会把对象文本清空。
+  useEffect(() => {
+    if (editingActive) setDraft(text?.unicode ?? '');
+  }, [editingActive, text?.unicode]);
   const rows: PropertyRow[] = text
     ? [
         { label: 'ObjectId', value: `#${inspector?.object_id ?? ''}`, mono: true },
@@ -283,7 +288,8 @@ function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: 
         { label: '颜色', value: '未采集', muted: true },
         {
           label: '页 / 层级',
-          value: `第 ${inspector?.page ?? '—'} 页 · z=${inspector?.z_index ?? '—'}`,
+          // 层级只是诊断信息，用中文而不是 z= 暴露内部字段名。
+          value: `第 ${inspector?.page ?? '—'} 页 · 层级 ${inspector?.z_index ?? '—'}`,
           mono: true,
         },
         { label: '旋转', value: focusedPageRotation === null ? '—' : `${focusedPageRotation}°`, mono: true },
@@ -294,7 +300,7 @@ function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: 
   return (
     <PropertySection title="文本">
       <PropertyGrid rows={rows} />
-      {ctx.editing.active ? (
+      {editingActive ? (
         <div className="dw-prop-edit">
           <textarea
             className="dw-prop-input"
@@ -305,13 +311,14 @@ function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: 
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                actions.replaceText(draft);
-                actions.commit();
-              }
-              if (event.key === 'Escape') {
+                // 空文本不允许提交：回车会把对象文本清空。
+                if (draft.trim().length > 0) actions.replaceText(draft);
+              } else if (event.key === 'Escape') {
                 event.preventDefault();
                 actions.cancel();
               }
+              // 阻止冒泡到 App 的全局快捷键（Enter 会再 commit 一次）。
+              event.stopPropagation();
             }}
           />
           <div className="dw-prop-actions">
@@ -319,10 +326,7 @@ function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: 
               size="sm"
               variant="primary"
               disabled={draft.trim().length === 0}
-              onClick={() => {
-                actions.replaceText(draft);
-                actions.commit();
-              }}
+              onClick={() => actions.replaceText(draft)}
             >
               提交
             </Button>
@@ -390,7 +394,12 @@ function PageStatusInput({ ctx, actions }: { ctx: import('./types').FrameworkCon
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
         onKeyDown={(event) => {
-          if (event.key === 'Enter') commit();
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            // 阻止冒泡：编辑态下 Enter 会被全局快捷键当成“提交”，误伤正在编辑的对象。
+            event.stopPropagation();
+            commit();
+          }
         }}
       />
       / {ctx.pageCount || '—'} 页
@@ -505,7 +514,7 @@ function DebugInspectorSection({ ctx }: InspectorRenderProps) {
   const rows: PropertyRow[] = [
     { label: '版本', value: `v${ctx.revision}`, mono: true },
     { label: '待提交补丁', value: String(ctx.pendingPatches), mono: true },
-    { label: '命中优先级', value: ctx.hitPriority || '—', mono: true },
+    // 命中优先级（z=）是调试信息，用户不需要看到；ctx 投影保留，仅移除渲染。
     { label: '最近事件', value: ctx.lastEvent || '—' },
   ];
   return (
@@ -672,8 +681,8 @@ export const builtinFeature: DesktopFeature = {
     { id: 'saveAs', tab: 'home', group: 'home.document', label: '另存为', icon: 'saveAs', order: 30, needs: ['document'], run: (a) => a.saveAs() },
     { id: 'undo', tab: 'home', group: 'home.history', label: '撤销', icon: 'undo', order: 10, needs: ['undo'], reason: '当前没有可撤销的操作', run: (a) => a.undo() },
     { id: 'redo', tab: 'home', group: 'home.history', label: '重做', icon: 'redo', order: 20, needs: ['redo'], reason: '当前没有可重做的操作', run: (a) => a.redo() },
-    { id: 'print', tab: 'home', group: 'home.output', label: '打印', icon: 'print', order: 10, needs: [], reason: '打印能力由后续章节接入', run: () => undefined },
-    { id: 'export', tab: 'home', group: 'home.output', label: '导出', icon: 'export', order: 20, needs: [], reason: '导出能力由后续章节接入', run: () => undefined },
+    { id: 'print', tab: 'home', group: 'home.output', label: '打印', icon: 'print', order: 10, needs: ['never'], reason: '打印能力由后续章节接入', run: () => undefined },
+    { id: 'export', tab: 'home', group: 'home.output', label: '导出', icon: 'export', order: 20, needs: ['never'], reason: '导出能力由后续章节接入', run: () => undefined },
 
     { id: 'mode.browse', tab: 'edit', group: 'edit.mode', label: '浏览', icon: 'browse', order: 10, needs: ['always'], active: (ctx) => ctx.mode === 'browse', run: (a) => a.setMode('browse') },
     { id: 'mode.select', tab: 'edit', group: 'edit.mode', label: '选择', icon: 'select', order: 20, needs: ['document'], active: (ctx) => ctx.mode === 'select', run: (a) => a.setMode('select') },
@@ -687,12 +696,12 @@ export const builtinFeature: DesktopFeature = {
       needs: ['document', 'ocrAvailable'], active: (ctx) => ctx.mode === 'ocr',
       reason: '先打开文档并确认 OCR 引擎可用', run: (a) => a.setMode('ocr'),
     },
-    { id: 'image.replace', tab: 'edit', group: 'edit.object', label: '替换图片', icon: 'image', order: 10, needs: ['image'], reason: '替换图片属 18-07 图片编辑，IPC 未接入', run: () => undefined },
-    { id: 'crop', tab: 'edit', group: 'edit.object', label: '裁剪', icon: 'crop', order: 20, needs: [], reason: '裁剪属页面编辑扩展，尚未接入', run: () => undefined },
-    { id: 'path.edit', tab: 'edit', group: 'edit.object', label: '路径', icon: 'path', order: 30, needs: ['path'], reason: '先选中一个路径对象', run: () => undefined },
+    { id: 'image.replace', tab: 'edit', group: 'edit.object', label: '替换图片', icon: 'image', order: 10, needs: ['never'], reason: '替换图片属 18-07 图片编辑，IPC 未接入', run: () => undefined },
+    { id: 'crop', tab: 'edit', group: 'edit.object', label: '裁剪', icon: 'crop', order: 20, needs: ['never'], reason: '裁剪属页面编辑扩展，尚未接入', run: () => undefined },
+    { id: 'path.edit', tab: 'edit', group: 'edit.object', label: '路径', icon: 'path', order: 30, needs: ['never'], reason: '路径编辑由后续章节接入，IPC 未接入', run: () => undefined },
     {
       id: 'deleteObject', tab: 'edit', group: 'edit.object', label: '删除对象', icon: 'delete', order: 40,
-      needs: [], reason: '对象删除由 18A C-9 排除，本章不实现', run: () => undefined,
+      needs: ['never'], reason: '对象删除由 18A C-9 排除，本章不实现', run: () => undefined,
     },
     { id: 'rotateLeft', tab: 'edit', group: 'edit.page', label: '左转', icon: 'rotateLeft', order: 10, needs: ['document'], run: (a) => a.rotate(-90) },
     { id: 'rotateRight', tab: 'edit', group: 'edit.page', label: '右转', icon: 'rotateRight', order: 20, needs: ['document'], run: (a) => a.rotate(90) },
@@ -707,20 +716,25 @@ export const builtinFeature: DesktopFeature = {
     { id: 'ocr.pause', tab: 'ocr', group: 'ocr.main', label: '暂停', icon: 'select', order: 15, needs: ['ocrRunning'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrPause() },
     { id: 'ocr.resume', tab: 'ocr', group: 'ocr.main', label: '继续', icon: 'select', order: 16, needs: ['ocrPaused'], reason: '当前没有已暂停的 OCR 任务', run: (a) => a.ocrResume() },
     { id: 'ocr.cancel', tab: 'ocr', group: 'ocr.main', label: '取消', icon: 'close', order: 17, needs: ['ocrRunning', 'ocrPaused'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrCancel() },
-    { id: 'ocr.apply', tab: 'ocr', group: 'ocr.main', label: '应用当前结果', icon: 'save', order: 20, needs: ['document', 'ocrApplyable'], reason: '先接受当前 OCR 结果，且结果必须来自文本对象', run: (a) => a.ocrApplyActive?.() ?? a.ocrApply(0) },
+    {
+      id: 'ocr.apply', tab: 'ocr', group: 'ocr.main', label: '应用当前结果', icon: 'save', order: 20,
+      needs: ['document', 'ocrApplyable'], reason: '先接受当前 OCR 结果，且结果必须来自文本对象',
+      // ocrApplyActive 返回 void，不能用 ?? 兜底（会再应用第 0 条）。
+      run: (a) => { if (a.ocrApplyActive) a.ocrApplyActive(); else a.ocrApply(0); },
+    },
     { id: 'ocr.search', tab: 'ocr', group: 'ocr.main', label: '结果内查找', icon: 'outline', order: 30, needs: ['ocrResults'], reason: '先完成 OCR 识别', run: (a) => a.searchInOcr() },
-    { id: 'ocr.merge', tab: 'ocr', group: 'ocr.main', label: '合并文本层', icon: 'layers', order: 40, needs: [], reason: '合并策略由后续章节接入', run: () => undefined },
+    { id: 'ocr.merge', tab: 'ocr', group: 'ocr.main', label: '合并文本层', icon: 'layers', order: 40, needs: ['never'], reason: '合并策略由后续章节接入', run: () => undefined },
 
-    { id: 'annotation.highlight', tab: 'annotation', group: 'annotation.main', label: '高亮', icon: 'annotation', order: 10, needs: [], reason: '批注由 20 章接入', run: () => undefined },
-    { id: 'annotation.underline', tab: 'annotation', group: 'annotation.main', label: '下划线', icon: 'annotation', order: 20, needs: [], reason: '批注由 20 章接入', run: () => undefined },
-    { id: 'annotation.comment', tab: 'annotation', group: 'annotation.main', label: '批注', icon: 'annotation', order: 30, needs: [], reason: '批注由 20 章接入', run: () => undefined },
-    { id: 'annotation.signature', tab: 'annotation', group: 'annotation.main', label: '签名', icon: 'image', order: 40, needs: [], reason: '批注由 20 章接入', run: () => undefined },
+    { id: 'annotation.highlight', tab: 'annotation', group: 'annotation.main', label: '高亮', icon: 'annotation', order: 10, needs: ['never'], reason: '批注由 20 章接入', run: () => undefined },
+    { id: 'annotation.underline', tab: 'annotation', group: 'annotation.main', label: '下划线', icon: 'annotation', order: 20, needs: ['never'], reason: '批注由 20 章接入', run: () => undefined },
+    { id: 'annotation.comment', tab: 'annotation', group: 'annotation.main', label: '批注', icon: 'annotation', order: 30, needs: ['never'], reason: '批注由 20 章接入', run: () => undefined },
+    { id: 'annotation.signature', tab: 'annotation', group: 'annotation.main', label: '签名', icon: 'image', order: 40, needs: ['never'], reason: '批注由 20 章接入', run: () => undefined },
 
-    { id: 'ai.summarize', tab: 'ai', group: 'ai.main', label: '摘要', icon: 'ai', order: 10, needs: [], reason: 'AI 由 21 章接入', run: () => undefined },
-    { id: 'ai.translate', tab: 'ai', group: 'ai.main', label: '翻译', icon: 'ai', order: 20, needs: [], reason: 'AI 由 21 章接入', run: () => undefined },
-    { id: 'ai.rewrite', tab: 'ai', group: 'ai.main', label: '改写', icon: 'ai', order: 30, needs: [], reason: 'AI 由 21 章接入', run: () => undefined },
-    { id: 'ai.extract', tab: 'ai', group: 'ai.main', label: '提取', icon: 'ai', order: 40, needs: [], reason: 'AI 由 21 章接入', run: () => undefined },
-    { id: 'ai.chat', tab: 'ai', group: 'ai.main', label: '对话', icon: 'ai', order: 50, needs: [], reason: 'AI 由 21 章接入', run: () => undefined },
+    { id: 'ai.summarize', tab: 'ai', group: 'ai.main', label: '摘要', icon: 'ai', order: 10, needs: ['never'], reason: 'AI 由 21 章接入', run: () => undefined },
+    { id: 'ai.translate', tab: 'ai', group: 'ai.main', label: '翻译', icon: 'ai', order: 20, needs: ['never'], reason: 'AI 由 21 章接入', run: () => undefined },
+    { id: 'ai.rewrite', tab: 'ai', group: 'ai.main', label: '改写', icon: 'ai', order: 30, needs: ['never'], reason: 'AI 由 21 章接入', run: () => undefined },
+    { id: 'ai.extract', tab: 'ai', group: 'ai.main', label: '提取', icon: 'ai', order: 40, needs: ['never'], reason: 'AI 由 21 章接入', run: () => undefined },
+    { id: 'ai.chat', tab: 'ai', group: 'ai.main', label: '对话', icon: 'ai', order: 50, needs: ['never'], reason: 'AI 由 21 章接入', run: () => undefined },
 
     { id: 'zoomOut', tab: 'view', group: 'view.zoom', label: '缩小', icon: 'zoomOut', order: 10, needs: ['document'], run: (a) => a.zoomOut() },
     { id: 'zoomIn', tab: 'view', group: 'view.zoom', label: '放大', icon: 'zoomIn', order: 20, needs: ['document'], run: (a) => a.zoomIn() },
@@ -896,7 +910,12 @@ export const builtinFeature: DesktopFeature = {
       tone: (ctx) => (ctx.editing.active ? 'ok' : undefined),
     },
     // 中：Save / OCR / Search / AI（既有 dirty / undo / redo 诊断项随中组）
-    { id: 'dirty', label: '未保存', order: 50, group: 'center', value: (ctx) => (ctx.dirty ? '未保存' : '已保存'), tone: (ctx) => (ctx.dirty ? 'warn' : 'ok') },
+    {
+      id: 'dirty', label: '未保存', order: 50, group: 'center',
+      // 保存进行中时不能同时显示“已保存”，否则与右侧“保存中…”自相矛盾。
+      value: (ctx) => (ctx.saveFeedback === 'saving' ? '保存中' : ctx.dirty ? '未保存' : '已保存'),
+      tone: (ctx) => (ctx.saveFeedback === 'saving' ? 'warn' : ctx.dirty ? 'warn' : 'ok'),
+    },
     { id: 'undo', label: '撤销', order: 55, group: 'center', value: (ctx) => (ctx.canUndo ? '可撤销' : '—') },
     { id: 'redo', label: '重做', order: 56, group: 'center', value: (ctx) => (ctx.canRedo ? '可重做' : '—') },
     {

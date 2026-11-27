@@ -9,6 +9,8 @@ dist/
 **/dist/
 # 绿色版历史打包目录与运行期数据目录（不入库）
 /dist_*/
+**/dist_*/
+**/dist-*/
 /data/
 /workspace/cache/
 /workspace/current/

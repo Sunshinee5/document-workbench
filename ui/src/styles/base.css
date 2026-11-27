@@ -161,7 +161,8 @@ body.dw-resizing {
 
 @media (max-width: 1280px) {
   .dw-workspace-nav .dw-nav-panel {
-    width: 180px !important;
+    /* 只设上限：用 max-width 而不是 width + !important，避免覆盖用户拖拽出的宽度。 */
+    max-width: 180px;
   }
 }
 

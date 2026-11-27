@@ -362,6 +362,8 @@ export default function App() {
       void viewModel.save().then(() => {
         refreshEditor();
         pollFeedback();
+        // 命令已返回：清 pending，避免后端不写盘（Clean 跳过）时永久停在“保存中…”。
+        eventBridge.settleSave(viewModel.snapshot.dirty);
       });
     },
     saveAs: () => {
@@ -369,6 +371,7 @@ export default function App() {
       void viewModel.saveAs().then(() => {
         refreshEditor();
         pollFeedback();
+        eventBridge.settleSave(viewModel.snapshot.dirty);
       });
     },
     undo: () => void viewModel.undo().then(() => {
@@ -410,12 +413,21 @@ export default function App() {
     setTheme: (next) => setTheme(next),
     beginEdit: () => {
       const primary = editorState.selection.primary;
-      if (primary === null) return;
+      if (primary === null) {
+        push('请先选中一个文本对象', 'error');
+        return;
+      }
       void (async () => {
         const info = await editor.inspector(primary);
         await editor.beginEdit(primary, info?.text?.unicode ?? '');
-        setModeState('edit');
-        editor.setMode('edit');
+        // 只有 Core 真正确认进入编辑态才切换模式，避免灰按钮/假编辑态。
+        const editing = editor.snapshot.editing;
+        if (editing.active && editing.objectId === primary) {
+          setModeState('edit');
+          editor.setMode('edit');
+        } else {
+          push(editor.snapshot.error || '无法进入编辑：请确认主选是文本对象', 'error');
+        }
       })();
     },
     commit: () => void editor.commit().then(acceptCommit),
@@ -456,7 +468,9 @@ export default function App() {
       });
     },
     ocrCopyResult: () => {
-      const text = ocr.results[0]?.text ?? '';
+      // 优先复制当前激活项；没有激活项才回落到首条。
+      const index = ocrState.activeIndex;
+      const text = (index !== null ? ocr.results[index]?.text : ocr.results[0]?.text) ?? '';
       if (!text) {
         push('没有可复制的 OCR 结果', 'error');
         return;
@@ -466,8 +480,9 @@ export default function App() {
         push('当前环境不支持剪贴板', 'error');
         return;
       }
+      const label = index !== null ? `第 ${index + 1} 条` : '首条';
       void clipboard.writeText(text)
-        .then(() => push('已复制首条 OCR 文本', 'success'))
+        .then(() => push(`已复制${label} OCR 文本`, 'success'))
         .catch(() => push('复制失败：剪贴板不可用', 'error'));
     },
   }), [
@@ -507,12 +522,22 @@ export default function App() {
       const hit = await editor.hitTest(page, x, y, widthPx, rotation);
       if (!hit || hit.kind !== 'Text') return;
       const info = await editor.inspector(hit.object_id);
+      // Core 的 begin_edit 要求主选就是被编辑对象：先确认选择已生效，再开事务。
       await editor.select(page, hit.object_id);
+      if (editor.snapshot.selection.primary !== hit.object_id) {
+        push(editor.snapshot.error || '对象选择失败，无法进入编辑', 'error');
+        return;
+      }
       await editor.beginEdit(hit.object_id, info?.text?.unicode ?? '');
-      setModeState('edit');
-      editor.setMode('edit');
+      const editing = editor.snapshot.editing;
+      if (editing.active && editing.objectId === hit.object_id) {
+        setModeState('edit');
+        editor.setMode('edit');
+      } else {
+        push(editor.snapshot.error || '无法进入编辑：请确认主选是文本对象', 'error');
+      }
     })();
-  }, [editor]);
+  }, [editor, push]);
 
   /**
    * 18 章框选：Core 没有批量选择 IPC，沿用 editor.select 串行调用。
@@ -577,16 +602,18 @@ export default function App() {
       };
     }
     // 第19章：OCR 结果按页投影到同一 Overlay Stack，不建第二套覆盖层。
-    for (const result of ocrState.session.results) {
+    ocrState.session.results.forEach((result, resultIndex) => {
       const data = map[result.page];
-      if (!data) continue;
+      if (!data) return;
       (data.ocrResults ??= []).push({
+        // 全局序号：Overlay 审核 / 应用回调不能再用页内局部 index。
+        resultIndex,
         page: result.page,
         bbox: result.bbox,
         confidence: result.confidence,
         text: result.text,
       });
-    }
+    });
     return map;
   }, [state.objectTree, ocrState.session.results]);
 

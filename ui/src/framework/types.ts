@@ -121,6 +121,8 @@ export interface FrameworkActions {
 /** 能力需求名：Ribbon 按钮启用只由这些命名谓词决定（AD-13）。 */
 export const NEEDS = {
   always: () => true,
+  /** 未接入能力统一禁用：显示入口但永远不可点，由 reason 说明归属章节。 */
+  never: () => false,
   document: (ctx: FrameworkContext) => ctx.hasDocument,
   undo: (ctx: FrameworkContext) => ctx.hasDocument && ctx.canUndo,
   redo: (ctx: FrameworkContext) => ctx.hasDocument && ctx.canRedo,
@@ -207,6 +209,8 @@ export interface OverlayRenderProps {
   primaryObjectId?: number | null;
   /** 第19章：OCR 结果投影（Overlay 画 BBox + confidence）。 */
   ocrResults?: Array<{
+    /** 全局 OCR 结果序号（App 投影时写入），不是页内局部序号。 */
+    resultIndex: number;
     page: number;
     bbox: [number, number, number, number];
     confidence: number;
