@@ -8,7 +8,11 @@ export {
   AiPanel,
   AnnotationPanel,
   AttachmentsPanel,
+  CollaborationPanel,
   BookmarksPanel,
   OutlinePanel,
+  PluginPanel,
+  SearchPanel,
+  SettingsPanel,
 } from './panels/PlaceholderPanels';
 export { OcrWorkspace, type OcrWorkspaceProps } from './panels/OcrWorkspace';

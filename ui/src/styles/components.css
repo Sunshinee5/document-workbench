@@ -73,23 +73,26 @@
 /* Ribbon 大按钮：图标在上、文字在下。 */
 .dw-btn-stacked {
   flex-direction: column;
-  gap: 1px;
-  width: 58px;
-  height: 46px;
-  padding: 3px 2px;
+  gap: 2px;
+  width: var(--dw-btn-stacked-w);
+  height: var(--dw-btn-stacked-h);
+  padding: 1px 2px;
   border-color: transparent;
   background: transparent;
-  font-size: 10px;
+  font-size: var(--dw-font-ribbon);
+  line-height: 1;
 }
 
 .dw-btn-stacked .dw-icon {
-  font-size: 15px;
+  font-size: var(--dw-icon-stacked);
+  line-height: 1;
 }
 
 .dw-btn-stacked .dw-btn-label {
-  max-width: 54px;
+  max-width: 60px;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* ---- Panel ---- */
@@ -415,6 +418,20 @@
   cursor: not-allowed;
 }
 
+/* 框选拖拽期间固定十字光标；与 data-cursor 共用唯一出口。 */
+.pdf-viewer[data-framing='true'] {
+  cursor: crosshair;
+}
+
+/* 框选矩形：只读视觉反馈，不拦截鼠标。 */
+.dw-marquee {
+  position: absolute;
+  z-index: 6;
+  border: 1px dashed var(--dw-accent);
+  background: var(--dw-selection);
+  pointer-events: none;
+}
+
 /* 右键菜单（18B ContextMenu Framework）。 */
 .dw-context-menu {
   position: fixed;
@@ -424,7 +441,7 @@
   border: 1px solid var(--dw-border);
   border-radius: 6px;
   background: var(--dw-surface);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  box-shadow: var(--dw-shadow-menu);
   color: var(--dw-text);
 }
 
@@ -484,7 +501,7 @@
   margin: 0 auto;
   /* 纸张恒为白色：深色主题只改工作台，不改文档。 */
   background: var(--dw-paper);
-  box-shadow: 0 1px 4px rgba(16, 24, 40, 0.16);
+  box-shadow: var(--dw-shadow-page);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -571,6 +588,8 @@
   border: 1px solid var(--dw-accent);
   background: var(--dw-paper);
   border-radius: 1px;
+  /* Overlay 层整体不拦截鼠标；只有手柄接受 Hover 以切换 resize / rotate 光标。 */
+  pointer-events: auto;
 }
 
 .dw-handle-nw {
@@ -591,6 +610,16 @@
 .dw-handle-se {
   right: -4px;
   bottom: -4px;
+}
+
+/* Rotate Handle：顶部中间，仅显示（拖拽旋转未实现）。 */
+.dw-handle-rotate {
+  left: calc(50% - 4px);
+  top: -10px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border-style: dashed;
 }
 
 /* 编辑态 Caret：位置取对象框左侧，编辑事务由 EditingSession 驱动。 */
@@ -809,6 +838,40 @@
   background: var(--dw-accent-soft);
   background: color-mix(in srgb, var(--dw-accent-soft) 50%, transparent);
   animation: dw-ocr-appear var(--dw-motion-fast) var(--dw-motion-ease);
+  /* Hover / 点击需要命中 OCR 框；指针事件在框内 stopPropagation，不干扰框选。 */
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.dw-ocr-box.is-active {
+  box-shadow: 0 0 0 2px var(--dw-accent);
+}
+
+.dw-ocr-box.is-rejected {
+  opacity: 0.35;
+  border-color: var(--dw-text-muted);
+}
+
+/* Hover 轻操作条：直接贴在框上沿，复用统一 Button，不建第二套按钮。 */
+.dw-ocr-box-actions {
+  position: absolute;
+  bottom: 100%;
+  left: 0;
+  display: none;
+  gap: 2px;
+  z-index: 7;
+  pointer-events: auto;
+}
+
+.dw-ocr-box:hover .dw-ocr-box-actions,
+.dw-ocr-box.is-active .dw-ocr-box-actions {
+  display: flex;
+}
+
+.dw-ocr-box-btn {
+  padding: 1px 6px;
+  font-size: 10px;
+  line-height: 1.3;
 }
 
 .dw-ocr-box-tag {
@@ -827,4 +890,180 @@
 @keyframes dw-ocr-appear {
   from { opacity: 0; transform: scale(0.98); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* ---- Dashboard（规范 26 第一部分 §4）：未开文档时的唯一落地页 ---- */
+
+.dw-dashboard {
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  background: var(--dw-bg);
+}
+
+.dw-dashboard-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: min(1120px, 100%);
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.dw-dashboard-hero {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-lg);
+  background: var(--dw-surface);
+  box-shadow: var(--dw-shadow);
+}
+
+.dw-dashboard-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.dw-dashboard-title {
+  color: var(--dw-text);
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.dw-dashboard-subtitle {
+  color: var(--dw-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.dw-dashboard-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+}
+
+.dw-dashboard-drop {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  border: 1px dashed var(--dw-border-strong);
+  border-radius: var(--dw-radius-lg);
+  background: var(--dw-surface-2);
+  color: var(--dw-text-muted);
+  font-size: 12px;
+  transition: background var(--dw-motion-fast) var(--dw-motion-ease),
+    border-color var(--dw-motion-fast) var(--dw-motion-ease);
+}
+
+.dw-dashboard-drop.is-over {
+  border-color: var(--dw-accent);
+  background: var(--dw-accent-soft);
+  color: var(--dw-accent);
+}
+
+.dw-dashboard-drop-icon {
+  font-size: 20px;
+}
+
+.dw-dashboard-drop-hint {
+  color: var(--dw-text-muted);
+  font-size: 11px;
+}
+
+.dw-dashboard-drop-error {
+  color: var(--dw-danger);
+  font-size: 11px;
+}
+
+.dw-dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.dw-dashboard-card {
+  min-height: 180px;
+  border: 1px solid var(--dw-border);
+  border-radius: var(--dw-radius-lg);
+  background: var(--dw-surface);
+  overflow: hidden;
+}
+
+.dw-dashboard-card .dw-panel-header {
+  height: 32px;
+}
+
+.dw-dashboard-card .dw-panel-body {
+  overflow: auto;
+}
+
+.dw-dashboard-entries {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px;
+}
+
+.dw-dashboard-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 7px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--dw-radius);
+  background: transparent;
+  color: var(--dw-text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dw-dashboard-entry:hover {
+  border-color: var(--dw-border);
+  background: var(--dw-hover);
+}
+
+.dw-dashboard-entry-icon {
+  flex: 0 0 auto;
+}
+
+.dw-dashboard-entry-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.dw-dashboard-entry-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dw-dashboard-entry-meta {
+  color: var(--dw-text-muted);
+  font-size: 10px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (max-width: 900px) {
+  .dw-dashboard-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dw-dashboard-hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }

@@ -47,6 +47,7 @@ export type {
   RibbonGroupContribution,
   RibbonTabContribution,
   ShortcutBinding,
+  StatusGroup,
   StatusItem,
   StatusRender,
   ThemeToken,

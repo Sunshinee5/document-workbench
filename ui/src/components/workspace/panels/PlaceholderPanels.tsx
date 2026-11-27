@@ -10,16 +10,18 @@ function EmptyWorkspace({
   title,
   text,
   hint,
+  details = [],
   children,
 }: {
   title: string;
   text: string;
   hint: string;
+  details?: string[];
   children?: ReactNode;
 }) {
   return (
     <Panel title={title} footer={children}>
-      <PanelEmpty text={text} hint={hint} />
+      <PanelEmpty text={text} hint={hint} details={details} />
     </Panel>
   );
 }
@@ -76,6 +78,72 @@ export function AnnotationPanel() {
   );
 }
 
+/** Search：21 章（规范 22），本 Sprint 只提供分类入口与统一空态。 */
+export function SearchPanel() {
+  return (
+    <EmptyWorkspace
+      title="搜索"
+      text="暂无搜索记录"
+      hint="21 章接入后，这里显示查询历史、结果列表与来源跳转。"
+      details={['查询历史', '结果列表', '来源跳转']}
+    >
+      <Button size="sm" disabled title="全文搜索由 21 章接入">
+        新建搜索
+      </Button>
+    </EmptyWorkspace>
+  );
+}
+
+/** Plugin：23 章（规范 24），Marketplace 为 Placeholder。 */
+export function PluginPanel() {
+  return (
+    <EmptyWorkspace
+      title="插件"
+      text="暂无插件"
+      hint="23 章接入后，这里显示已安装 / 已禁用插件、权限、版本与能力。"
+      details={[
+        'Installed 已安装',
+        'Disabled 已禁用',
+        'Permission 权限',
+        'Version 版本',
+        'Capability 能力',
+        'Marketplace 插件市场（Placeholder）',
+      ]}
+    >
+      <Button size="sm" disabled title="插件市场由 23 章接入">
+        打开插件市场
+      </Button>
+    </EmptyWorkspace>
+  );
+}
+
+/** Settings：能力设置入口，本 Sprint 只提供分类入口与统一空态。 */
+export function SettingsPanel() {
+  return (
+    <EmptyWorkspace
+      title="设置"
+      text="暂无设置项"
+      hint="这里将集中展示编辑器、OCR、搜索与插件的偏好设置。"
+    />
+  );
+}
+
+/** Collaboration：24 章（规范 25），六项能力统一 Coming Soon 占位。 */
+export function CollaborationPanel() {
+  return (
+    <EmptyWorkspace
+      title="协作"
+      text="协作能力尚未接入"
+      hint="24 章接入后，这里显示版本、时间线、审计、在线状态、同步与冲突处理。"
+      details={['Version 版本', 'Timeline 时间线', 'Audit 审计', 'Presence 在线状态', 'Sync 同步', 'Conflict 冲突']}
+    >
+      <Button size="sm" disabled title="24 章接入后显示">
+        新建协作会话
+      </Button>
+    </EmptyWorkspace>
+  );
+}
+
 /** AI：21 章。禁止浮窗，统一在本 Workspace 内对话。 */
 export function AiPanel() {
   return (
@@ -97,7 +165,8 @@ export function AiPanel() {
     >
       <PanelEmpty
         text="AI 尚未接入"
-        hint="21 章接入后，这里显示摘要 / 翻译 / 改写结果与会话历史；结果只写 Workspace，不弹浮窗。"
+        hint="22 章接入后，这里显示会话与审阅结果；结果只写 Workspace，不弹浮窗。"
+        details={['Prompt', 'Review', 'Apply', 'History', 'Context', 'Provider']}
       />
     </Panel>
   );

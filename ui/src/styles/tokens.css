@@ -37,9 +37,25 @@
   --dw-radius: 6px;
   --dw-radius-lg: 10px;
   --dw-shadow: 0 4px 16px rgba(16, 24, 40, 0.12);
+  /* Fluent 阴影分层：菜单浮层与纸张各自独立，组件不再写死 rgba。 */
+  --dw-shadow-menu: 0 8px 24px rgba(16, 24, 40, 0.18);
+  --dw-shadow-page: 0 1px 4px rgba(16, 24, 40, 0.16);
+
+  /* Ribbon 统一尺寸（规范 26 第一部分 §1）：图标 / 文字 / 按钮 / 间距全部 Token 化。 */
+  --dw-icon-stacked: 32px;
+  --dw-icon-quick: 14px;
+  --dw-font-ribbon: 12px;
+  --dw-btn-stacked-w: 64px;
+  --dw-btn-stacked-h: 48px;
+  --dw-ribbon-tabs-h: 26px;
+  --dw-ribbon-body-h: 65px;
+  --dw-group-body-h: 48px;
+  --dw-group-gap: 8px;
+  --dw-quick-btn-w: 28px;
+  --dw-quick-btn-h: 22px;
 
   --dw-titlebar-h: 38px;
-  --dw-ribbon-h: 104px;
+  --dw-ribbon-h: 92px;
   --dw-statusbar-h: 30px;
   --dw-sidebar-w: 224px;
   --dw-inspector-w: 296px;
@@ -70,4 +86,6 @@
   --dw-ocr-mid: #f2a455;
   --dw-ocr-low: #f97066;
   --dw-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --dw-shadow-menu: 0 8px 24px rgba(0, 0, 0, 0.5);
+  --dw-shadow-page: 0 1px 4px rgba(0, 0, 0, 0.4);
 }

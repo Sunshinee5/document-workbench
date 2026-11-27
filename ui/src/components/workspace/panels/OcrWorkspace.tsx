@@ -21,6 +21,10 @@ export interface OcrWorkspaceProps {
   onDecide: (index: number, accept: boolean) => void;
   onApply: (index: number) => void;
   onClearCache: () => void;
+  /** 当前激活结果序号（FrameworkContext 只读投影）。 */
+  activeIndex?: number | null;
+  /** 点击结果行设为当前结果（与 Overlay 共享同一投影）。 */
+  onActivate?: (index: number) => void;
 }
 
 /** 解析「1,2,3」页码串。 */
@@ -50,6 +54,8 @@ export function OcrWorkspace({
   onDecide,
   onApply,
   onClearCache,
+  activeIndex = null,
+  onActivate,
 }: OcrWorkspaceProps) {
   const [pagesText, setPagesText] = useState('');
   const [regionText, setRegionText] = useState('');
@@ -157,7 +163,11 @@ export function OcrWorkspace({
               {session.results.map((result, index) => {
                 const review = session.reviews[index];
                 return (
-                  <div key={`${result.page}-${index}`} className="dw-ocr-result">
+                  <div
+                    key={`${result.page}-${index}`}
+                    className={activeIndex === index ? 'dw-ocr-result is-active' : 'dw-ocr-result'}
+                    onClick={() => onActivate?.(index)}
+                  >
                     <div className="dw-ocr-result-head">
                       <span>第 {result.page} 页 · {Math.round(result.confidence * 100)}%</span>
                       <span className="dw-ocr-result-kind">{result.language}</span>

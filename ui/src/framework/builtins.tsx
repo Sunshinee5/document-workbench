@@ -3,7 +3,7 @@
 // 行为必须与 18A 完全一致：浏览 / 对象选择 / 文字编辑 / 保存链路不变。
 // 这里只做「声明化改造」，不新增业务：每条命令 / 分区 / 层都是注册项。
 import { useEffect, useState } from 'react';
-import { Button, PropertyGrid, PropertySection, type PropertyRow } from '../components/ui';
+import { Button, PanelEmpty, PropertyGrid, PropertySection, type PropertyRow } from '../components/ui';
 import type { InspectorInfo } from '../ipc';
 import type {
   DesktopFeature,
@@ -83,10 +83,26 @@ function renderSelectionOverlay(props: OverlayRenderProps) {
         {editing ? <span className="dw-caret" /> : null}
         {selected ? (
           <>
-            <span className="dw-handle dw-handle-nw" />
-            <span className="dw-handle dw-handle-ne" />
-            <span className="dw-handle dw-handle-sw" />
-            <span className="dw-handle dw-handle-se" />
+            {(['nw', 'ne', 'sw', 'se'] as const).map((corner) => (
+              <span
+                key={corner}
+                className={`dw-handle dw-handle-${corner}`}
+                title="缩放由页面命令完成，拖拽缩放未实现"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => event.stopPropagation()}
+                onMouseEnter={() => props.onCursorOverride?.('resize')}
+                onMouseLeave={() => props.onCursorOverride?.(null)}
+              />
+            ))}
+            {/* Rotate Handle：规范只要求显示，不实现拖拽旋转。 */}
+            <span
+              className="dw-handle dw-handle-rotate"
+              title="旋转由页面命令完成，拖拽旋转未实现"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={(event) => event.stopPropagation()}
+              onMouseEnter={() => props.onCursorOverride?.('rotate')}
+              onMouseLeave={() => props.onCursorOverride?.(null)}
+            />
           </>
         ) : null}
       </div>
@@ -130,11 +146,28 @@ function InlineTextEditor({ props }: { props: OverlayRenderProps }) {
         }}
         onBlur={() => {
           // 失焦不自动提交：避免点击 Inspector 时产生双提交；提交仍走 Enter / Ribbon。
+          // 有未提交改动时用唯一 ToastStack 轻提示，不弹 alert / dialog。
+          if (draft !== (props.editingText ?? '')) {
+            props.notify?.('文本修改未提交，按 Enter 保存或 Esc 取消');
+          }
         }}
       />
       <div className="dw-inline-editor-actions">
-        <button type="button" onClick={() => props.onCommitText?.(draft)}>提交</button>
-        <button type="button" onClick={() => props.onCancelEdit?.()}>取消</button>
+        {/* 阻止 mousedown 抢焦点：否则提交 / 取消按钮会先触发失焦提示。 */}
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => props.onCommitText?.(draft)}
+        >
+          提交
+        </button>
+        <button
+          type="button"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => props.onCancelEdit?.()}
+        >
+          取消
+        </button>
       </div>
     </div>
   );
@@ -145,17 +178,27 @@ function renderEditingOverlay(props: OverlayRenderProps) {
   return props.editingObjectId !== null ? <InlineTextEditor props={props} /> : null;
 }
 
-/** OCR Overlay（第19章）：结果 BBox + confidence 着色，只读不拦截鼠标。 */
+/** OCR Overlay（第19章 / 规范 26 第三部分）：BBox + Hover 轻操作条，不直接写文档。 */
 function renderOcrOverlay(props: OverlayRenderProps) {
   // App 按页投影，只传当前页结果；这里直接画，不按页再过滤。
   const visible = props.ocrResults ?? [];
+  const reviews = props.ocrReviews ?? [];
+  const canApply = props.ocrCanApply ?? [];
+  const activeIndex = props.ocrActiveIndex ?? null;
   return visible.map((result, index) => {
     const box = projectBox(result.bbox, props.pageWidth, props.pageHeight, props.rotation);
+    const review = reviews.find((item) => item.result_index === index);
+    const accepted = review?.decision === '已接受';
+    const rejected = review?.decision === '已拒绝';
+    const classes = ['dw-ocr-box'];
+    if (activeIndex === index) classes.push('is-active');
+    if (rejected) classes.push('is-rejected');
+    const applyDisabled = !canApply[index];
     return (
       <div
         key={`ocr-${result.page}-${index}`}
-        className="dw-ocr-box"
-        title={`${result.text} · ${Math.round(result.confidence * 100)}%`}
+        className={classes.join(' ')}
+        title={`${result.text} · ${Math.round(result.confidence * 100)}% · ${review?.decision ?? '待审核'}`}
         style={{
           left: `${box.left}%`,
           top: `${box.top}%`,
@@ -163,8 +206,64 @@ function renderOcrOverlay(props: OverlayRenderProps) {
           height: `${box.height}%`,
           borderColor: `var(--dw-ocr-${result.confidence >= 0.8 ? 'high' : result.confidence >= 0.5 ? 'mid' : 'low'})`,
         }}
+        // Overlay 自身可交互，但指针事件不传给画布：框选 / 页面选择互不干扰。
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          props.onOcrActivate?.(index);
+        }}
       >
         <span className="dw-ocr-box-tag">{Math.round(result.confidence * 100)}%</span>
+        <div
+          className="dw-ocr-box-actions"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <Button
+            size="sm"
+            className="dw-ocr-box-btn"
+            disabled={accepted}
+            title={accepted ? '该结果已接受' : '接受该 OCR 结果'}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onOcrDecide?.(index, true);
+            }}
+          >
+            接受
+          </Button>
+          <Button
+            size="sm"
+            className="dw-ocr-box-btn"
+            disabled={rejected}
+            title={rejected ? '该结果已拒绝' : '拒绝该 OCR 结果（不可再应用）'}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.stopPropagation();
+              props.onOcrDecide?.(index, false);
+            }}
+          >
+            拒绝
+          </Button>
+          <Button
+            size="sm"
+            variant="primary"
+            className="dw-ocr-box-btn"
+            disabled={applyDisabled}
+            title={rejected
+              ? '已拒绝的结果不可应用'
+              : applyDisabled
+                ? '需先接受结果，且结果必须来自文本对象'
+                : '经 Editing Engine 写回，可撤销'}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!applyDisabled) props.onOcrApply?.(index);
+            }}
+          >
+            应用
+          </Button>
+        </div>
       </div>
     );
   });
@@ -299,6 +398,13 @@ function PageStatusInput({ ctx, actions }: { ctx: import('./types').FrameworkCon
   );
 }
 
+/** HiDPI 比例投影：只读 CSS Token，不持有第二份 DPR 真值。 */
+function scaleLabel(): string {
+  const raw = window.getComputedStyle(document.documentElement).getPropertyValue('--dw-ui-scale').trim();
+  const scale = Number.parseFloat(raw);
+  return Number.isFinite(scale) && scale > 0 ? `${Math.round(scale * 100)}%` : '100%';
+}
+
 /** Inspector 文档分区。 */
 function DocumentInspectorSection({ ctx, document, formatSize }: InspectorRenderProps) {
   const rows: PropertyRow[] = ctx.hasDocument
@@ -315,6 +421,95 @@ function DocumentInspectorSection({ ctx, document, formatSize }: InspectorRender
     : [{ label: '文档', value: '尚未打开', muted: true }];
   return (
     <PropertySection title="文档">
+      <PropertyGrid rows={rows} />
+    </PropertySection>
+  );
+}
+
+/** 无数据分区：统一文案 + 统一空态组件，禁止各分区自造 Placeholder。 */
+function PlaceholderInspection({ title, hint }: { title: string; hint: string }) {
+  return (
+    <PropertySection title={title}>
+      <PanelEmpty text="暂无数据" hint={hint} />
+    </PropertySection>
+  );
+}
+
+/** 页面分区：只读投影；未打开文档时统一空态。 */
+function PageInspectorSection({ ctx, focusedPageRotation }: InspectorRenderProps) {
+  if (!ctx.hasDocument) {
+    return <PlaceholderInspection title="页面" hint="打开 PDF 后显示页码、页数与旋转信息。" />;
+  }
+  const rows: PropertyRow[] = [
+    { label: '当前页', value: String(ctx.page), mono: true },
+    { label: '总页数', value: String(ctx.pageCount), mono: true },
+    { label: '旋转', value: focusedPageRotation === null ? '—' : `${focusedPageRotation}°`, mono: true },
+    { label: '缩放', value: `${ctx.zoomPercent}%`, mono: true },
+  ];
+  return (
+    <PropertySection title="页面">
+      <PropertyGrid rows={rows} />
+    </PropertySection>
+  );
+}
+
+/** 选择分区：只读投影，真值仍在 SelectionState。 */
+function SelectionInspectorSection({ ctx }: InspectorRenderProps) {
+  if (ctx.selection.selected.length === 0) {
+    return <PlaceholderInspection title="选择" hint="在页面或对象树中选择对象后显示数量与主选。" />;
+  }
+  const rows: PropertyRow[] = [
+    { label: '数量', value: `${ctx.selection.selected.length}`, mono: true },
+    { label: '主选', value: ctx.selection.primary === null ? '—' : `#${ctx.selection.primary}`, mono: true },
+    { label: '校验', value: ctx.selectionValidation },
+    { label: '页码', value: ctx.selection.page === null ? '—' : `第 ${ctx.selection.page} 页`, mono: true },
+  ];
+  return (
+    <PropertySection title="选择">
+      <PropertyGrid rows={rows} />
+    </PropertySection>
+  );
+}
+
+/** OCR 分区：Provider / Confidence 缺失时统一显示「—」。 */
+function OcrInspectorSection({ ctx }: InspectorRenderProps) {
+  const confidence = ctx.ocrConfidence;
+  const hasConfidence = typeof confidence === 'number' && Number.isFinite(confidence);
+  const rows: PropertyRow[] = [
+    { label: '会话状态', value: ctx.ocrStateLabel },
+    { label: '进度', value: `${ctx.ocrProgress}%`, mono: true },
+    { label: '结果数', value: `${ctx.ocrResultCount} 条`, mono: true },
+    { label: 'Provider', value: ctx.ocrProvider || '—', muted: !ctx.ocrProvider },
+    {
+      label: 'Confidence',
+      value: hasConfidence ? `${Math.round((confidence as number) * 100)}%` : '—',
+      mono: hasConfidence,
+      muted: !hasConfidence,
+    },
+    { label: '文本', value: ctx.ocrActiveText || '—', muted: !ctx.ocrActiveText },
+    { label: '引擎', value: ctx.ocrAvailable ? '可用' : '未安装', muted: !ctx.ocrAvailable },
+    { label: '写回方式', value: 'Editing Engine', muted: true },
+  ];
+  return (
+    <PropertySection title="OCR">
+      <PropertyGrid rows={rows} />
+    </PropertySection>
+  );
+}
+
+/** 调试分区：只投影只读计数器，不暴露任何真值对象。 */
+function DebugInspectorSection({ ctx }: InspectorRenderProps) {
+  if (!ctx.hasDocument) {
+    return <PlaceholderInspection title="调试" hint="打开文档后显示版本号、待提交补丁与最近事件。" />;
+  }
+  const rows: PropertyRow[] = [
+    { label: '版本', value: `v${ctx.revision}`, mono: true },
+    { label: '待提交补丁', value: String(ctx.pendingPatches), mono: true },
+    { label: '命中优先级', value: ctx.hitPriority || '—', mono: true },
+    { label: '最近事件', value: ctx.lastEvent || '—' },
+  ];
+  return (
+    <PropertySection title="调试">
       <PropertyGrid rows={rows} />
     </PropertySection>
   );
@@ -367,76 +562,83 @@ export const builtinFeature: DesktopFeature = {
     { id: 'ocr.results', layer: 'ocr', order: 10, render: renderOcrOverlay },
   ],
 
-  // ---- Inspector Framework：分区由注册表渲染 ----
+  // ---- Inspector Framework：26 §5 固定十分区，无数据统一显示 Placeholder ----
   inspectors: [
     { id: 'document', title: '文档', order: 10, matches: () => true, render: DocumentInspectorSection },
     {
-      id: 'object', title: '对象', order: 15, matches: () => true, render: ({ inspector }) => (
-        <PropertySection title="对象">
-          <PropertyGrid
-            rows={inspector
-              ? [
-                  { label: 'ObjectId', value: `#${inspector.object_id}`, mono: true },
-                  { label: '类型', value: `${inspector.kind_label}（${inspector.kind}）`, mono: true },
-                  { label: '页码', value: `第 ${inspector.page} 页`, mono: true },
-                  {
-                    label: 'Bounding Box',
-                    value: inspector.bbox.map((value) => value.toFixed(1)).join(', '),
-                    mono: true,
-                  },
-                  { label: '层级 z', value: String(inspector.z_index), mono: true },
-                  { label: '版本', value: `v${inspector.version}`, mono: true },
-                  { label: '生命周期', value: inspector.lifecycle, mono: true },
-                ]
-              : [{ label: '对象', value: '未选中对象', muted: true }]}
-          />
-        </PropertySection>
+      id: 'page', title: '页面', order: 20, matches: () => true, render: PageInspectorSection,
+    },
+    {
+      id: 'selection', title: '选择', order: 30, matches: () => true, render: SelectionInspectorSection,
+    },
+    {
+      id: 'object', title: '对象', order: 40, matches: () => true, render: (props) => (
+        <>
+          <PropertySection title="对象">
+            <PropertyGrid
+              rows={props.inspector
+                ? [
+                    { label: 'ObjectId', value: `#${props.inspector.object_id}`, mono: true },
+                    { label: '类型', value: `${props.inspector.kind_label}（${props.inspector.kind}）`, mono: true },
+                    { label: '页码', value: `第 ${props.inspector.page} 页`, mono: true },
+                    {
+                      label: 'Bounding Box',
+                      value: props.inspector.bbox.map((value) => value.toFixed(1)).join(', '),
+                      mono: true,
+                    },
+                    { label: '层级 z', value: String(props.inspector.z_index), mono: true },
+                    { label: '版本', value: `v${props.inspector.version}`, mono: true },
+                    { label: '生命周期', value: props.inspector.lifecycle, mono: true },
+                  ]
+                : [{ label: '对象', value: '未选中对象', muted: true }]}
+            />
+          </PropertySection>
+          {/* Text / Image / Path 归入 Object 分区内部，保留全部既有编辑能力。 */}
+          <TextInspectorSection {...props} />
+          <PropertySection title="图片">
+            <PropertyGrid rows={imageRows(props.inspector)} />
+            <div className="dw-prop-actions">
+              <Button size="sm" disabled title="替换图片属 18-07 图片编辑，IPC 未接入">替换</Button>
+              <Button size="sm" disabled title="裁剪属页面编辑扩展，尚未接入">裁剪</Button>
+            </div>
+          </PropertySection>
+          <PropertySection title="路径">
+            <PropertyGrid
+              rows={props.inspector?.path
+                ? [
+                    { label: '指令数', value: String(props.inspector.path.command_count), mono: true },
+                    { label: '描边', value: props.inspector.path.stroke ?? '—', mono: true },
+                    { label: '填充', value: props.inspector.path.fill ?? '—', mono: true },
+                    { label: '线宽', value: '未采集', muted: true },
+                  ]
+                : [{ label: '对象', value: '未选中路径对象', muted: true }]}
+            />
+          </PropertySection>
+        </>
       ),
     },
     {
-      id: 'text', title: '文本', order: 20, matches: () => true, render: (props) => <TextInspectorSection {...props} />,
+      id: 'ocr', title: 'OCR', order: 50, matches: () => true, render: OcrInspectorSection,
     },
     {
-      id: 'image', title: '图片', order: 30, matches: () => true, render: ({ inspector }) => (
-        <PropertySection title="图片">
-          <PropertyGrid rows={imageRows(inspector)} />
-          <div className="dw-prop-actions">
-            <Button size="sm" disabled title="替换图片属 18-07 图片编辑，IPC 未接入">替换</Button>
-            <Button size="sm" disabled title="裁剪属页面编辑扩展，尚未接入">裁剪</Button>
-          </div>
-        </PropertySection>
-      ),
+      id: 'annotation', title: '批注', order: 60, matches: () => true,
+      render: () => <PlaceholderInspection title="批注" hint="批注由 20 章接入，接入后显示作者、内容与回复。" />,
     },
     {
-      id: 'path', title: '路径', order: 40, matches: () => true, render: ({ inspector }) => (
-        <PropertySection title="路径">
-          <PropertyGrid
-            rows={inspector?.path
-              ? [
-                  { label: '指令数', value: String(inspector.path.command_count), mono: true },
-                  { label: '描边', value: inspector.path.stroke ?? '—', mono: true },
-                  { label: '填充', value: inspector.path.fill ?? '—', mono: true },
-                  { label: '线宽', value: '未采集', muted: true },
-                ]
-              : [{ label: '对象', value: '未选中路径对象', muted: true }]}
-          />
-        </PropertySection>
-      ),
+      id: 'search', title: '搜索', order: 70, matches: () => true,
+      render: () => <PlaceholderInspection title="搜索" hint="搜索由 21 章接入，接入后显示查询、结果与来源。" />,
     },
     {
-      id: 'ocr', title: 'OCR', order: 50, matches: (ctx) => ctx.ocrResultCount > 0, render: ({ ctx }) => (
-        <PropertySection title="OCR">
-          <PropertyGrid
-            rows={[
-              { label: '会话状态', value: ctx.ocrStateLabel },
-              { label: '进度', value: `${ctx.ocrProgress}%`, mono: true },
-              { label: '结果数', value: `${ctx.ocrResultCount} 条`, mono: true },
-              { label: '引擎', value: ctx.ocrAvailable ? '可用' : '未安装', muted: !ctx.ocrAvailable },
-              { label: '写回方式', value: 'Editing Engine', muted: true },
-            ]}
-          />
-        </PropertySection>
-      ),
+      id: 'ai', title: 'AI', order: 80, matches: () => true,
+      render: () => <PlaceholderInspection title="AI" hint="AI 由 22 章接入，接入后显示 Provider、Model 与 Token。" />,
+    },
+    {
+      id: 'plugin', title: '插件', order: 90, matches: () => true,
+      render: () => <PlaceholderInspection title="插件" hint="插件由 23 章接入，接入后显示权限、版本与能力。" />,
+    },
+    {
+      id: 'debug', title: '调试', order: 100, matches: () => true,
+      render: DebugInspectorSection,
     },
   ],
 
@@ -466,10 +668,10 @@ export const builtinFeature: DesktopFeature = {
   ],
   ribbonCommands: [
     { id: 'open', tab: 'home', group: 'home.document', label: '打开', icon: 'open', order: 10, needs: ['always'], run: (a) => a.open() },
-    { id: 'save', tab: 'home', group: 'home.document', label: '保存', icon: 'save', order: 20, variant: 'primary', needs: ['document'], run: (a) => a.save() },
+    { id: 'save', tab: 'home', group: 'home.document', label: '保存', icon: 'save', order: 20, variant: 'primary', needs: ['document'], reason: '请先打开文档', run: (a) => a.save() },
     { id: 'saveAs', tab: 'home', group: 'home.document', label: '另存为', icon: 'saveAs', order: 30, needs: ['document'], run: (a) => a.saveAs() },
-    { id: 'undo', tab: 'home', group: 'home.history', label: '撤销', icon: 'undo', order: 10, needs: ['undo'], run: (a) => a.undo() },
-    { id: 'redo', tab: 'home', group: 'home.history', label: '重做', icon: 'redo', order: 20, needs: ['redo'], run: (a) => a.redo() },
+    { id: 'undo', tab: 'home', group: 'home.history', label: '撤销', icon: 'undo', order: 10, needs: ['undo'], reason: '当前没有可撤销的操作', run: (a) => a.undo() },
+    { id: 'redo', tab: 'home', group: 'home.history', label: '重做', icon: 'redo', order: 20, needs: ['redo'], reason: '当前没有可重做的操作', run: (a) => a.redo() },
     { id: 'print', tab: 'home', group: 'home.output', label: '打印', icon: 'print', order: 10, needs: [], reason: '打印能力由后续章节接入', run: () => undefined },
     { id: 'export', tab: 'home', group: 'home.output', label: '导出', icon: 'export', order: 20, needs: [], reason: '导出能力由后续章节接入', run: () => undefined },
 
@@ -505,7 +707,7 @@ export const builtinFeature: DesktopFeature = {
     { id: 'ocr.pause', tab: 'ocr', group: 'ocr.main', label: '暂停', icon: 'select', order: 15, needs: ['ocrRunning'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrPause() },
     { id: 'ocr.resume', tab: 'ocr', group: 'ocr.main', label: '继续', icon: 'select', order: 16, needs: ['ocrPaused'], reason: '当前没有已暂停的 OCR 任务', run: (a) => a.ocrResume() },
     { id: 'ocr.cancel', tab: 'ocr', group: 'ocr.main', label: '取消', icon: 'close', order: 17, needs: ['ocrRunning', 'ocrPaused'], reason: '当前没有运行中的 OCR 任务', run: (a) => a.ocrCancel() },
-    { id: 'ocr.apply', tab: 'ocr', group: 'ocr.main', label: '应用首个结果', icon: 'save', order: 20, needs: ['document', 'ocrApplyable'], reason: '先接受首个 OCR 结果，且结果必须来自文本对象', run: (a) => a.ocrApply(0) },
+    { id: 'ocr.apply', tab: 'ocr', group: 'ocr.main', label: '应用当前结果', icon: 'save', order: 20, needs: ['document', 'ocrApplyable'], reason: '先接受当前 OCR 结果，且结果必须来自文本对象', run: (a) => a.ocrApplyActive?.() ?? a.ocrApply(0) },
     { id: 'ocr.search', tab: 'ocr', group: 'ocr.main', label: '结果内查找', icon: 'outline', order: 30, needs: ['ocrResults'], reason: '先完成 OCR 识别', run: (a) => a.searchInOcr() },
     { id: 'ocr.merge', tab: 'ocr', group: 'ocr.main', label: '合并文本层', icon: 'layers', order: 40, needs: [], reason: '合并策略由后续章节接入', run: () => undefined },
 
@@ -594,7 +796,12 @@ export const builtinFeature: DesktopFeature = {
     { id: 'nextPage', combo: 'pagedown', order: 160, run: (a) => a.nextPage() },
     { id: 'prevPage', combo: 'pageup', order: 170, run: (a) => a.prevPage() },
     {
-      id: 'searchOcr', combo: 'ctrl+f', order: 180,
+      // 21 章 C-9：Ctrl+F 归 Global Search；OCR 内检索迁到 Ctrl+Shift+F。
+      id: 'searchGlobal', combo: 'ctrl+f', order: 180,
+      enabled: () => true, run: (a) => a.openGlobalSearch?.(),
+    },
+    {
+      id: 'searchOcr', combo: 'ctrl+shift+f', order: 185,
       enabled: (ctx) => ctx.ocrResultCount > 0, run: (a) => a.searchInOcr(),
     },
     {
@@ -603,19 +810,58 @@ export const builtinFeature: DesktopFeature = {
     },
   ],
 
-  // ---- Theme Framework：token 名册（值在 tokens.css） ----
+  // ---- Theme Framework：token 名册（值在 tokens.css；26 §7 要求与 CSS 实际名册一致） ----
   themeTokens: [
-    { id: 'accent', cssVar: '--dw-accent', usage: '主强调色：选中框、主按钮、光标提示' },
     { id: 'bg', cssVar: '--dw-bg', usage: '工作台背景' },
-    { id: 'paper', cssVar: '--dw-paper', usage: '画布纸张背景' },
+    { id: 'surface', cssVar: '--dw-surface', usage: '面板 / 按钮主表面' },
+    { id: 'surface2', cssVar: '--dw-surface-2', usage: '次级表面：Ribbon 主体 / 输入框' },
+    { id: 'surface3', cssVar: '--dw-surface-3', usage: '画布底色 / 三级表面' },
+    { id: 'border', cssVar: '--dw-border', usage: '常规分隔线' },
+    { id: 'borderStrong', cssVar: '--dw-border-strong', usage: '强调分隔线与滚动条' },
     { id: 'text', cssVar: '--dw-text', usage: '正文文字' },
+    { id: 'textMuted', cssVar: '--dw-text-muted', usage: '辅助说明文字' },
+    { id: 'accent', cssVar: '--dw-accent', usage: '主强调色：选中框、主按钮、光标提示' },
+    { id: 'accentSoft', cssVar: '--dw-accent-soft', usage: '强调色浅底：Hover / 激活态' },
+    { id: 'accentText', cssVar: '--dw-accent-text', usage: '强调底上的文字' },
     { id: 'danger', cssVar: '--dw-danger', usage: '危险操作 / 错误提示' },
+    { id: 'dangerSoft', cssVar: '--dw-danger-soft', usage: '错误浅底' },
+    { id: 'success', cssVar: '--dw-success', usage: '成功态文本' },
+    { id: 'warning', cssVar: '--dw-warning', usage: '警告 / 未保存态文本' },
+    { id: 'selection', cssVar: '--dw-selection', usage: '对象选中填充' },
+    { id: 'hover', cssVar: '--dw-hover', usage: '统一 Hover 背景' },
+    { id: 'caret', cssVar: '--dw-caret', usage: 'Inline Editor 光标' },
+    { id: 'paper', cssVar: '--dw-paper', usage: '画布纸张背景' },
+    { id: 'motionFast', cssVar: '--dw-motion-fast', usage: 'Overlay / Tooltip 快速过渡' },
+    { id: 'motionNormal', cssVar: '--dw-motion-normal', usage: 'Progress / Panel 常规过渡' },
+    { id: 'motionEase', cssVar: '--dw-motion-ease', usage: '统一缓动曲线' },
     { id: 'ocrHigh', cssVar: '--dw-ocr-high', usage: 'OCR 高置信度 BBox' },
     { id: 'ocrMid', cssVar: '--dw-ocr-mid', usage: 'OCR 中置信度 BBox' },
     { id: 'ocrLow', cssVar: '--dw-ocr-low', usage: 'OCR 低置信度 BBox' },
-    { id: 'motionFast', cssVar: '--dw-motion-fast', usage: 'Overlay / Tooltip 快速过渡' },
-    { id: 'motionNormal', cssVar: '--dw-motion-normal', usage: 'Progress / Panel 常规过渡' },
     { id: 'uiScale', cssVar: '--dw-ui-scale', usage: 'HiDPI 投影缩放（WebView DPR）' },
+    { id: 'font', cssVar: '--dw-font', usage: '全局字体' },
+    { id: 'fontMono', cssVar: '--dw-font-mono', usage: 'ID / 坐标等宽字体' },
+    { id: 'radius', cssVar: '--dw-radius', usage: '控件统一圆角' },
+    { id: 'radiusLg', cssVar: '--dw-radius-lg', usage: '卡片 / 面板统一圆角' },
+    { id: 'shadow', cssVar: '--dw-shadow', usage: 'Toast / Dashboard 卡片阴影' },
+    { id: 'shadowMenu', cssVar: '--dw-shadow-menu', usage: '右键菜单浮层阴影' },
+    { id: 'shadowPage', cssVar: '--dw-shadow-page', usage: 'PDF 纸张阴影' },
+    { id: 'titlebarH', cssVar: '--dw-titlebar-h', usage: '第一区高度' },
+    { id: 'ribbonH', cssVar: '--dw-ribbon-h', usage: '第二区高度' },
+    { id: 'statusbarH', cssVar: '--dw-statusbar-h', usage: '第六区高度' },
+    { id: 'sidebarW', cssVar: '--dw-sidebar-w', usage: '左侧导航默认宽度' },
+    { id: 'inspectorW', cssVar: '--dw-inspector-w', usage: '右侧属性面板宽度' },
+    { id: 'tabbarH', cssVar: '--dw-tabbar-h', usage: '文档页签条高度' },
+    { id: 'iconStacked', cssVar: '--dw-icon-stacked', usage: 'Ribbon 大按钮图标尺寸' },
+    { id: 'iconQuick', cssVar: '--dw-icon-quick', usage: 'Quick Access 图标尺寸' },
+    { id: 'fontRibbon', cssVar: '--dw-font-ribbon', usage: 'Ribbon 统一文字尺寸' },
+    { id: 'btnStackedW', cssVar: '--dw-btn-stacked-w', usage: 'Ribbon 大按钮统一宽度' },
+    { id: 'btnStackedH', cssVar: '--dw-btn-stacked-h', usage: 'Ribbon 大按钮统一高度' },
+    { id: 'ribbonTabsH', cssVar: '--dw-ribbon-tabs-h', usage: 'Ribbon 页签行高度' },
+    { id: 'ribbonBodyH', cssVar: '--dw-ribbon-body-h', usage: 'Ribbon 主体高度' },
+    { id: 'groupBodyH', cssVar: '--dw-group-body-h', usage: 'Ribbon 分组按钮区高度' },
+    { id: 'groupGap', cssVar: '--dw-group-gap', usage: 'Ribbon 分组统一间距' },
+    { id: 'quickBtnW', cssVar: '--dw-quick-btn-w', usage: 'Quick Access 按钮宽度' },
+    { id: 'quickBtnH', cssVar: '--dw-quick-btn-h', usage: 'Quick Access 按钮高度' },
   ],
 
   // ---- Dock Framework：六槽位结构冻结（不实现浮动 / 保存） ----
@@ -628,12 +874,13 @@ export const builtinFeature: DesktopFeature = {
     { id: 'statusbar', slot: 'statusbar', order: 10, label: '状态栏' },
   ],
 
-  // ---- Status Framework：统一状态栏项 ----
+  // ---- Status Framework：左 / 中 / 右三组（26 §6）；所有既有项保留 ----
   statusItems: [
-    { id: 'zoom', label: '缩放', order: 10, value: (ctx) => `${ctx.zoomPercent}%` },
-    { id: 'page', label: '页码', order: 20, render: (ctx, actions) => <PageStatusInput ctx={ctx} actions={actions} /> },
+    // 左：Page / Zoom / Selection / Mode（既有 tool / editing 诊断项随左组）
+    { id: 'page', label: '页码', order: 10, group: 'left', render: (ctx, actions) => <PageStatusInput ctx={ctx} actions={actions} /> },
+    { id: 'zoom', label: '缩放', order: 20, group: 'left', value: (ctx) => `${ctx.zoomPercent}%` },
     {
-      id: 'selection', label: '选择', order: 30,
+      id: 'selection', label: '选择', order: 30, group: 'left',
       value: (ctx) => {
         const count = ctx.selection.selected.length;
         if (count === 0) return `Selection(0) · ${ctx.selectionValidation}`;
@@ -641,34 +888,42 @@ export const builtinFeature: DesktopFeature = {
       },
       tone: (ctx) => (ctx.selectionValidation === '失效' ? 'warn' : undefined),
     },
-    { id: 'tool', label: '当前工具', order: 35, value: (ctx) => `工具(${ctx.toolLabel})` },
-    { id: 'mode', label: '光标模式', order: 40, value: (ctx) => ctx.mode },
+    { id: 'tool', label: '当前工具', order: 35, group: 'left', value: (ctx) => `工具(${ctx.toolLabel})` },
+    { id: 'mode', label: '光标模式', order: 40, group: 'left', value: (ctx) => ctx.mode },
     {
-      id: 'editing', label: '编辑', order: 50,
+      id: 'editing', label: '编辑', order: 45, group: 'left',
       value: (ctx) => (ctx.editing.active ? `编辑中 #${ctx.editing.objectId ?? '—'}` : '—'),
       tone: (ctx) => (ctx.editing.active ? 'ok' : undefined),
     },
-    { id: 'dirty', label: '未保存', order: 60, value: (ctx) => (ctx.dirty ? '未保存' : '已保存'), tone: (ctx) => (ctx.dirty ? 'warn' : 'ok') },
-    { id: 'undo', label: '撤销', order: 70, value: (ctx) => (ctx.canUndo ? '可撤销' : '—') },
-    { id: 'redo', label: '重做', order: 80, value: (ctx) => (ctx.canRedo ? '可重做' : '—') },
+    // 中：Save / OCR / Search / AI（既有 dirty / undo / redo 诊断项随中组）
+    { id: 'dirty', label: '未保存', order: 50, group: 'center', value: (ctx) => (ctx.dirty ? '未保存' : '已保存'), tone: (ctx) => (ctx.dirty ? 'warn' : 'ok') },
+    { id: 'undo', label: '撤销', order: 55, group: 'center', value: (ctx) => (ctx.canUndo ? '可撤销' : '—') },
+    { id: 'redo', label: '重做', order: 56, group: 'center', value: (ctx) => (ctx.canRedo ? '可重做' : '—') },
     {
-      id: 'save', label: '保存', order: 90,
+      id: 'save', label: '保存', order: 60, group: 'center',
       value: (ctx) => {
         if (ctx.saveFeedback === 'saving') return '保存中…';
         if (ctx.saveFeedback === 'failed') return ctx.saveMessage || '保存失败';
-        if (ctx.saveFeedback === 'success') return `${ctx.saveMessage || '保存成功'}${ctx.saveMessage ? '' : ''}`;
+        if (ctx.saveFeedback === 'success') return ctx.saveMessage || '保存成功';
         return ctx.saveText;
       },
       tone: (ctx) => (ctx.saveFeedback === 'failed' ? 'danger' : ctx.saveFeedback === 'saving' ? 'warn' : ctx.dirty ? 'warn' : 'ok'),
     },
     {
-      id: 'ocr', label: 'OCR', order: 100,
+      id: 'ocr', label: 'OCR', order: 70, group: 'center',
       value: (ctx) => `${ctx.ocrStateLabel} · ${ctx.ocrProgress}% · ${ctx.ocrResultCount} 条`,
       tone: (ctx) => (ctx.ocrStateLabel.includes('失败') ? 'danger' : ctx.ocrStateLabel.includes('识别中') ? 'warn' : undefined),
     },
-    { id: 'ai', label: 'AI', order: 110, value: () => 'AI 未接入' },
-    { id: 'memory', label: '内存', order: 120, value: () => '—' },
-    { id: 'parser', label: '解析器', order: 130, value: (ctx) => ctx.parserText },
-    { id: 'event', label: '最近事件', order: 140, value: (ctx) => ctx.lastEvent || '—' },
+    {
+      id: 'search', label: '搜索', order: 80, group: 'center',
+      value: (ctx) => ctx.searchStateLabel || '搜索未就绪',
+    },
+    { id: 'ai', label: 'AI', order: 90, group: 'center', value: () => 'AI 未接入' },
+    // 右：Memory / CPU / Scale（parser / event 诊断项随右组）
+    { id: 'memory', label: '内存', order: 100, group: 'right', value: () => '—' },
+    { id: 'cpu', label: 'CPU · 未采集', order: 110, group: 'right', value: () => '—' },
+    { id: 'scale', label: '界面缩放（HiDPI）', order: 120, group: 'right', value: () => scaleLabel() },
+    { id: 'parser', label: '解析器', order: 130, group: 'right', value: (ctx) => ctx.parserText },
+    { id: 'event', label: '最近事件', order: 140, group: 'right', value: (ctx) => ctx.lastEvent || '—' },
   ],
 };

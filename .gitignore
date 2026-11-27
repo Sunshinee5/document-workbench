@@ -7,6 +7,13 @@ node_modules/
 **/node_modules/
 dist/
 **/dist/
+# 绿色版历史打包目录与运行期数据目录（不入库）
+/dist_*/
+/data/
+/workspace/cache/
+/workspace/current/
+/workspace/recent/
+/workspace/temp/
 
 # 运行期目录：内容不入库，仅保留 README 占位说明
 Recovery/*

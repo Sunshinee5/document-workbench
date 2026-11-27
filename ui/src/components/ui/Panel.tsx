@@ -7,6 +7,8 @@ import type { ReactNode } from 'react';
 export interface PanelProps {
   /** 面板标题。 */
   title: string;
+  /** 额外容器类（Dashboard 卡片等场景），不改变 Panel 结构。 */
+  className?: string;
   /** 标题右侧操作区。 */
   actions?: ReactNode;
   /** 面板底部固定区（如「清空选择」）。 */
@@ -17,9 +19,9 @@ export interface PanelProps {
 }
 
 /** 统一面板。 */
-export function Panel({ title, actions, footer, scroll = true, children }: PanelProps) {
+export function Panel({ title, className, actions, footer, scroll = true, children }: PanelProps) {
   return (
-    <section className="dw-panel">
+    <section className={className ? `dw-panel ${className}` : 'dw-panel'}>
       <header className="dw-panel-header">
         <span className="dw-panel-title">{title}</span>
         {actions ? <span className="dw-panel-actions">{actions}</span> : null}
@@ -31,11 +33,30 @@ export function Panel({ title, actions, footer, scroll = true, children }: Panel
 }
 
 /** 面板空态：未打开文档 / 能力未接入都用它，不用弹窗。 */
-export function PanelEmpty({ text, hint }: { text: string; hint?: string }) {
+export function PanelEmpty({
+  text,
+  hint,
+  details = [],
+}: {
+  text: string;
+  hint?: string;
+  /** 能力占位清单；未接入项统一显示「即将推出」，不新增第二套空态组件。 */
+  details?: string[];
+}) {
   return (
     <div className="dw-empty">
       <div className="dw-empty-text">{text}</div>
       {hint ? <div className="dw-empty-hint">{hint}</div> : null}
+      {details.length > 0 ? (
+        <ul className="dw-empty-details">
+          {details.map((detail) => (
+            <li key={detail} className="dw-empty-detail">
+              <span className="dw-empty-detail-name">{detail}</span>
+              <span className="dw-empty-detail-state">即将推出</span>
+            </li>
+          ))}
+        </ul>
+      ) : null}
     </div>
   );
 }

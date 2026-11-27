@@ -1,7 +1,9 @@
-// Workspace 分类定义（规范 16 §三 / §五）。
+// Workspace 分类定义（规范 16 §三 / §五 / 22 C-2 / 26 第一部分 §3）。
 //
-// 固定十类，顺序即导航顺序。新增能力 → 新增 Workspace，禁止新增 Dock Window。
-// Batch / Layers 是 Future 分类：显示在导航里但禁用，不得隐藏（§四 同理）。
+// 原固定十类是 R1.0 基线；16 §三同时规定「每新增能力 → 新增 Workspace」，
+// 22 C-2 明确允许追加第 11 类 search。此处按 26 再追加 plugin / settings /
+// collaboration 三个 UI 占位分类（不新增 Ribbon 页签 / Dock Window，不改六区结构）。
+// 既有十类顺序保持原样，新分类统一追加在末尾；Batch / Layers 仍禁用显示。
 import type { IconName } from '../ui';
 
 /** Workspace 标识。 */
@@ -15,7 +17,11 @@ export type WorkspaceKind =
   | 'ai'
   | 'attachments'
   | 'batch'
-  | 'layers';
+  | 'layers'
+  | 'search'
+  | 'plugin'
+  | 'settings'
+  | 'collaboration';
 
 /** 一条导航定义。 */
 export interface WorkspaceDef {
@@ -31,7 +37,7 @@ export interface WorkspaceDef {
   reason?: string;
 }
 
-/** 十类 Workspace：顺序冻结。 */
+/** Workspace 分类：前 10 项冻结，后 4 项按 22 C-2 / 26 §3 追加。 */
 export const WORKSPACES: WorkspaceDef[] = [
   { id: 'pages', label: '页面', icon: 'pages', enabled: true },
   { id: 'bookmarks', label: '书签', icon: 'bookmark', enabled: true },
@@ -55,6 +61,11 @@ export const WORKSPACES: WorkspaceDef[] = [
     enabled: false,
     reason: '图层属 Future 能力',
   },
+  // 以下四项为 26 章追加的 UI 入口，Core 未落地前只显示统一空态。
+  { id: 'search', label: '搜索', icon: 'search', enabled: true },
+  { id: 'plugin', label: '插件', icon: 'plugin', enabled: true },
+  { id: 'settings', label: '设置', icon: 'settings', enabled: true },
+  { id: 'collaboration', label: '协作', icon: 'layers', enabled: true },
 ];
 
 /** 取分类定义。 */

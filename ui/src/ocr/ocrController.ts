@@ -30,6 +30,8 @@ export interface OcrState {
   error: string;
   /** 是否正在提交 Apply。 */
   applying: boolean;
+  /** 当前激活的 OCR 结果序号（纯 UI 投影，不写 Core / Session）。 */
+  activeIndex: number | null;
 }
 
 /** 空会话投影。 */
@@ -55,6 +57,7 @@ export class OcrController {
     provider: 'text-layer',
     error: '',
     applying: false,
+    activeIndex: null,
   };
   private listeners: Array<() => void> = [];
 
@@ -70,8 +73,21 @@ export class OcrController {
   }
 
   private update(patch: Partial<OcrState>): void {
-    this.stateValue = { ...this.stateValue, ...patch };
+    const next = { ...this.stateValue, ...patch };
+    // 会话刷新 / 新识别后结果集可能变短，失效的激活序号自动归零（纯 UI 保护）。
+    if (next.activeIndex !== null && next.activeIndex >= next.session.results.length) {
+      next.activeIndex = null;
+    }
+    this.stateValue = next;
     for (const listener of this.listeners) listener();
+  }
+
+  /** 设当前 OCR 结果；只读投影，不产生任何 Command。 */
+  setActiveIndex(index: number | null): void {
+    if (this.stateValue.activeIndex === index) {
+      return;
+    }
+    this.update({ activeIndex: index });
   }
 
   /** 初始化：拉取 Provider 列表与当前会话。 */

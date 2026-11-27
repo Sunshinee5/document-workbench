@@ -4,7 +4,7 @@
 // 折叠只隐藏面板，导航条始终可见；宽度由调用方持有（纯 UI 偏好，不进 Session）。
 import { useCallback, useEffect, useRef } from 'react';
 import type { ReactNode } from 'react';
-import { Icon } from '../ui';
+import { Icon, Tooltip } from '../ui';
 import { WORKSPACES, type WorkspaceKind } from './workspaces';
 
 export interface WorkspaceNavProps {
@@ -76,38 +76,42 @@ export function WorkspaceNav({
           if (!item.enabled) {
             classes.push('is-disabled');
           }
+          const tooltip = item.enabled ? item.label : `${item.label}（${item.reason ?? '未接入'}）`;
           return (
-            <button
-              key={item.id}
-              type="button"
-              className={classes.join(' ')}
-              title={item.enabled ? item.label : `${item.label}（${item.reason ?? '未接入'}）`}
-              aria-pressed={item.id === active && !collapsed}
-              disabled={!item.enabled}
-              onClick={() => {
-                if (item.id === active) {
-                  onToggleCollapsed();
-                  return;
-                }
-                onActiveChange(item.id);
-                if (collapsed) {
-                  onToggleCollapsed();
-                }
-              }}
-            >
-              <Icon name={item.icon} />
-            </button>
+            <Tooltip key={item.id} text={tooltip} disabled={!item.enabled}>
+              <button
+                type="button"
+                className={classes.join(' ')}
+                aria-label={tooltip}
+                aria-pressed={item.id === active && !collapsed}
+                disabled={!item.enabled}
+                onClick={() => {
+                  if (item.id === active) {
+                    onToggleCollapsed();
+                    return;
+                  }
+                  onActiveChange(item.id);
+                  if (collapsed) {
+                    onToggleCollapsed();
+                  }
+                }}
+              >
+                <Icon name={item.icon} />
+              </button>
+            </Tooltip>
           );
         })}
         <span className="dw-nav-spacer" />
-        <button
-          type="button"
-          className="dw-nav-item dw-nav-toggle"
-          title={collapsed ? '展开面板' : '折叠面板'}
-          onClick={onToggleCollapsed}
-        >
-          <Icon name={collapsed ? 'expand' : 'collapse'} />
-        </button>
+        <Tooltip text={collapsed ? '展开面板' : '折叠面板'}>
+          <button
+            type="button"
+            className="dw-nav-item dw-nav-toggle"
+            aria-label={collapsed ? '展开面板' : '折叠面板'}
+            onClick={onToggleCollapsed}
+          >
+            <Icon name={collapsed ? 'expand' : 'collapse'} />
+          </button>
+        </Tooltip>
       </nav>
 
       {collapsed ? null : (

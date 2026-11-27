@@ -13,10 +13,11 @@ import {
   useRef,
   useState,
 } from 'react';
+import type { PointerEvent as ReactPointerEvent } from 'react';
 import { GlobalWorkerOptions, getDocument, type PDFDocumentProxy } from 'pdfjs-dist';
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { readDocumentBytes } from '../ipc';
-import { PageOverlays, type OverlayObject } from './overlay';
+import { PageOverlays, projectBox, type OverlayObject } from './overlay';
 
 GlobalWorkerOptions.workerSrc = workerUrl;
 
@@ -32,6 +33,73 @@ const BASE_SCALE = 1.25;
 
 /** 页与页之间的间距（像素）。 */
 const PAGE_GAP = 16;
+
+/** 拖拽超过该像素数才算框选，低于阈值仍按单击处理。 */
+const FRAME_THRESHOLD_PX = 4;
+
+/** 框选矩形：相对当前页槽的百分比坐标（0..100）。 */
+interface FrameRect {
+  page: number;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** 拖拽中的起点 / 当前点与是否越过阈值。 */
+interface DragState {
+  page: number;
+  startX: number;
+  startY: number;
+  x: number;
+  y: number;
+  active: boolean;
+}
+
+/** 把拖拽像素轨迹归一化为页内百分比矩形。 */
+function dragFrame(drag: DragState, widthPx: number, heightPx: number): FrameRect {
+  const safeWidth = widthPx > 0 ? widthPx : 1;
+  const safeHeight = heightPx > 0 ? heightPx : 1;
+  const clamp = (value: number) => Math.max(0, Math.min(100, value));
+  const left = clamp((Math.min(drag.startX, drag.x) / safeWidth) * 100);
+  const top = clamp((Math.min(drag.startY, drag.y) / safeHeight) * 100);
+  const right = clamp((Math.max(drag.startX, drag.x) / safeWidth) * 100);
+  const bottom = clamp((Math.max(drag.startY, drag.y) / safeHeight) * 100);
+  return {
+    page: drag.page,
+    left,
+    top,
+    width: Math.max(0, right - left),
+    height: Math.max(0, bottom - top),
+  };
+}
+
+/**
+ * 框选命中：不改 Rust / IPC，直接在前端对 Overlay BBox 投影求交。
+ * bbox 是 PDF 点坐标（左下原点），projectBox 已处理旋转，这里统一用屏幕百分比比较。
+ */
+function framedObjectIds(
+  pageData: PageOverlayData | undefined,
+  rotation: number,
+  rect: FrameRect,
+): number[] {
+  if (!pageData) {
+    return [];
+  }
+  const ids: number[] = [];
+  for (const object of pageData.objects) {
+    const box = projectBox(object.bbox, pageData.pageWidth, pageData.pageHeight, rotation);
+    const intersects =
+      rect.left < box.left + box.width
+      && rect.left + rect.width > box.left
+      && rect.top < box.top + box.height
+      && rect.top + rect.height > box.top;
+    if (intersects) {
+      ids.push(object.objectId);
+    }
+  }
+  return ids;
+}
 
 /** Viewer 对外暴露的命令式接口：跳页与适应宽度需要知道滚动容器的实时尺寸。 */
 export interface PdfViewerHandle {
@@ -109,6 +177,24 @@ interface PdfViewerProps {
   primaryObjectId?: number | null;
   /** 光标种类：唯一来源是 CursorManager.resolve(toolId)，组件不得自行设置。 */
   cursorKind?: string;
+  /** 18 章：当前工具 id，交给 Overlay 手柄决定 Hover 光标。 */
+  toolMode?: string;
+  /** 18 章：框选结束；objectIds 为空表示空框选，由 App 清选择。 */
+  onFrameSelect?: (page: number, objectIds: number[]) => void;
+  /** 18 章：Inline Editor 失焦轻提示，交给 App 唯一 ToastStack。 */
+  onNotify?: (text: string) => void;
+  /** 第19章：OCR Review 决策只读投影。 */
+  ocrReviews?: Array<{ result_index: number; decision: string }>;
+  /** 第19章：当前激活 OCR 结果序号。 */
+  ocrActiveIndex?: number | null;
+  /** 第19章：逐结果可 Apply 标记。 */
+  ocrCanApply?: boolean[];
+  /** 第19章：点击 OCR 框设为当前结果。 */
+  onOcrActivate?: (index: number) => void;
+  /** 第19章：Overlay 接受 / 拒绝。 */
+  onOcrDecide?: (index: number, accept: boolean) => void;
+  /** 第19章：Overlay 应用（仍走 Editing Engine）。 */
+  onOcrApply?: (index: number) => void;
   /** 右键：交给 App 从 ContextMenuRegistry 收集菜单项。 */
   onPageContextMenu?: (x: number, y: number) => void;
   /** 指针在页面内移动：交给 Controller 做命中测试。 */
@@ -256,6 +342,15 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     hoverPriority = '',
     primaryObjectId = null,
     cursorKind = 'arrow',
+    toolMode = '',
+    onFrameSelect,
+    onNotify,
+    ocrReviews = [],
+    ocrActiveIndex = null,
+    ocrCanApply = [],
+    onOcrActivate,
+    onOcrDecide,
+    onOcrApply,
     onPageContextMenu,
     onPagePointerMove,
     onPagePointerLeave,
@@ -276,6 +371,13 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   const [resizeTick, setResizeTick] = useState(0);
   /** 当前 PDF.js 加载任务：切换文档 / 保存后重新读字节时先销毁旧任务。 */
   const loadingTaskRef = useRef<ReturnType<typeof getDocument> | null>(null);
+  /** 18 章框选：拖拽状态放 ref，避免 pointermove 每帧触发重渲染。 */
+  const dragRef = useRef<DragState | null>(null);
+  const [frameRect, setFrameRect] = useState<FrameRect | null>(null);
+  /** 框选结束后短暂吞掉 click，避免拖拽被当成单击选择。 */
+  const suppressClickUntilRef = useRef(0);
+  /** Overlay 手柄 Hover 的临时光标覆盖；始终通过 data-cursor 唯一出口下发。 */
+  const [cursorOverride, setCursorOverride] = useState<string | null>(null);
 
   // 加载文档：拿字节 → PDF.js 解析 → 用第 1 页尺寸作为所有页的基准尺寸。
   useEffect(() => {
@@ -380,6 +482,80 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
     return () => window.removeEventListener('resize', onResize);
   }, []);
 
+  // Esc 取消进行中的框选；不 preventDefault，编辑态 Esc 仍由 ShortcutRegistry 处理。
+  useEffect(() => {
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || !dragRef.current) {
+        return;
+      }
+      dragRef.current = null;
+      setFrameRect(null);
+      suppressClickUntilRef.current = Date.now() + 250;
+    };
+    window.addEventListener('keydown', onEscape);
+    return () => window.removeEventListener('keydown', onEscape);
+  }, []);
+
+  const handleFramePointerDown = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    page: number,
+  ) => {
+    if (event.button !== 0) {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    dragRef.current = { page, startX: x, startY: y, x, y, active: false };
+    setFrameRect(null);
+    // 捕获指针：拖出页面边界仍能收到 move / up。
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  }, []);
+
+  const handleFramePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>, page: number) => {
+    const drag = dragRef.current;
+    if (!drag || drag.page !== page) {
+      return;
+    }
+    const rect = event.currentTarget.getBoundingClientRect();
+    drag.x = event.clientX - rect.left;
+    drag.y = event.clientY - rect.top;
+    if (!drag.active) {
+      const moved = Math.abs(drag.x - drag.startX) > FRAME_THRESHOLD_PX
+        || Math.abs(drag.y - drag.startY) > FRAME_THRESHOLD_PX;
+      if (!moved) {
+        return;
+      }
+      drag.active = true;
+    }
+    setFrameRect(dragFrame(drag, rect.width, rect.height));
+  }, []);
+
+  const handleFramePointerUp = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    page: number,
+    rotation: number,
+  ) => {
+    const drag = dragRef.current;
+    if (!drag || drag.page !== page) {
+      return;
+    }
+    dragRef.current = null;
+    if (!drag.active) {
+      return;
+    }
+    suppressClickUntilRef.current = Date.now() + 250;
+    const rect = event.currentTarget.getBoundingClientRect();
+    const ids = framedObjectIds(overlayPages?.[page], rotation, dragFrame(drag, rect.width, rect.height));
+    setFrameRect(null);
+    onFrameSelect?.(page, ids);
+  }, [overlayPages, onFrameSelect]);
+
+  const handleFramePointerCancel = useCallback(() => {
+    dragRef.current = null;
+    setFrameRect(null);
+  }, []);
+
   const pageBoxes = displayOrder.map((original) => {
     const rotation = rotations[original] ?? 0;
     const sideways = rotation % 180 !== 0;
@@ -476,7 +652,13 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
   }
 
   return (
-    <div className="pdf-viewer" ref={containerRef} data-cursor={cursorKind} onScroll={handleScroll}>
+    <div
+      className="pdf-viewer"
+      ref={containerRef}
+      data-cursor={cursorOverride ?? cursorKind}
+      data-framing={frameRect ? 'true' : 'false'}
+      onScroll={handleScroll}
+    >
       <div className="pdf-pages">
         {pageBoxes.map((box, index) => (
           <div
@@ -485,6 +667,10 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               pageRefs.current[index] = element;
             }}
             className={selectedPages.includes(index + 1) ? 'pdf-page-slot selected' : 'pdf-page-slot'}
+            onPointerDown={(event) => handleFramePointerDown(event, box.original)}
+            onPointerMove={(event) => handleFramePointerMove(event, box.original)}
+            onPointerUp={(event) => handleFramePointerUp(event, box.original, box.rotation)}
+            onPointerCancel={handleFramePointerCancel}
             onMouseMove={(event) => {
               const rect = event.currentTarget.getBoundingClientRect();
               onPagePointerMove?.(
@@ -495,12 +681,19 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
                 box.rotation,
               );
             }}
-            onMouseLeave={() => onPagePointerLeave?.()}
+            onMouseLeave={() => {
+              setCursorOverride(null);
+              onPagePointerLeave?.();
+            }}
             onContextMenu={(event) => {
               event.preventDefault();
               onPageContextMenu?.(event.clientX, event.clientY);
             }}
             onClick={(event) => {
+              // 框选结束后的 click 是浏览器补发的，不能再写一次单击选择。
+              if (Date.now() < suppressClickUntilRef.current) {
+                return;
+              }
               // 页选择（Feature-02）与对象选择（17 章）并行：页级仍写 Session.selection.pages。
               const selectMode = event.shiftKey
                 ? 'range'
@@ -551,7 +744,28 @@ export const PdfViewer = forwardRef<PdfViewerHandle, PdfViewerProps>(function Pd
               hoverPriority={hoverPriority}
               primaryObjectId={primaryObjectId}
               ocrResults={overlayPages?.[box.original]?.ocrResults ?? []}
+              toolMode={toolMode}
+              onCursorOverride={setCursorOverride}
+              notify={onNotify}
+              ocrReviews={ocrReviews}
+              ocrActiveIndex={ocrActiveIndex}
+              ocrCanApply={ocrCanApply}
+              onOcrActivate={onOcrActivate}
+              onOcrDecide={onOcrDecide}
+              onOcrApply={onOcrApply}
             />
+            {frameRect?.page === box.original ? (
+              <div
+                className="dw-marquee"
+                data-frame-selection="true"
+                style={{
+                  left: `${frameRect.left}%`,
+                  top: `${frameRect.top}%`,
+                  width: `${frameRect.width}%`,
+                  height: `${frameRect.height}%`,
+                }}
+              />
+            ) : null}
           </div>
         ))}
       </div>

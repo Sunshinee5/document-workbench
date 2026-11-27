@@ -66,10 +66,13 @@
   border-radius: 10px;
 }
 
-/* ---- Ribbon（第二区，高 104px：页签 30 + 主体 74） ---- */
+/* ---- Ribbon（第二区，高 92px：页签 26 + 主体 65 + 下边框 1） ---- */
 
 .dw-ribbon {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  height: var(--dw-ribbon-h);
   flex: 0 0 auto;
   background: var(--dw-surface);
   border-bottom: 1px solid var(--dw-border);
@@ -79,14 +82,39 @@
   display: flex;
   align-items: flex-end;
   gap: 2px;
-  height: 30px;
+  height: var(--dw-ribbon-tabs-h);
   padding: 0 8px;
   border-bottom: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+/* Quick Access：固定在页签行左端，只复用 RibbonRegistry 的四条命令。 */
+.dw-ribbon-quick {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--dw-ribbon-tabs-h);
+  padding-right: var(--dw-group-gap);
+  margin-right: var(--dw-group-gap);
+  border-right: 1px solid var(--dw-border);
+  flex: 0 0 auto;
+}
+
+.dw-quick-btn {
+  width: var(--dw-quick-btn-w);
+  height: var(--dw-quick-btn-h);
+  padding: 0;
+  gap: 0;
+  font-size: var(--dw-font-ribbon);
+}
+
+.dw-quick-btn .dw-icon {
+  font-size: var(--dw-icon-quick);
 }
 
 .dw-ribbon-tab {
-  height: 26px;
-  padding: 0 14px;
+  height: 22px;
+  padding: 0 12px;
   border: 1px solid transparent;
   border-bottom: none;
   border-radius: var(--dw-radius) var(--dw-radius) 0 0;
@@ -112,18 +140,20 @@
   display: flex;
   align-items: stretch;
   gap: 0;
-  height: 73px;
-  padding: 4px 8px;
+  height: var(--dw-ribbon-body-h);
+  padding: 2px 8px;
   background: var(--dw-surface-2);
   overflow-x: auto;
   overflow-y: hidden;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .dw-ribbon-group {
   display: flex;
   flex-direction: column;
   justify-content: space-between;
-  padding: 0 10px;
+  padding: 0 var(--dw-group-gap);
   border-right: 1px solid var(--dw-border);
 }
 
@@ -134,26 +164,26 @@
 .dw-ribbon-group-body {
   display: flex;
   align-items: flex-start;
-  gap: 2px;
-  height: 52px;
+  gap: var(--dw-group-gap);
+  height: var(--dw-group-body-h);
 }
 
 .dw-ribbon-group-label {
   color: var(--dw-text-muted);
-  font-size: 10px;
+  font-size: var(--dw-font-ribbon);
   text-align: center;
-  padding-top: 2px;
+  line-height: 1;
 }
 
 .dw-ribbon-hint {
   position: absolute;
   right: 12px;
-  top: 8px;
+  top: 6px;
   display: inline-flex;
   align-items: center;
   gap: 4px;
   color: var(--dw-text-muted);
-  font-size: 10px;
+  font-size: var(--dw-font-ribbon);
 }
 
 /* ---- 文档页签条（Workspace 顶部上下文区，C-4） ---- */
@@ -247,6 +277,40 @@
   color: var(--dw-text-muted);
   flex: 0 0 auto;
   overflow: hidden;
+}
+
+/* 三组布局：左 / 中 / 右；任务事件与错误是独立尾区，不占三组。 */
+.dw-status-left,
+.dw-status-center,
+.dw-status-right {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.dw-status-left {
+  flex: 1 1 0;
+  justify-content: flex-start;
+}
+
+.dw-status-center {
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.dw-status-right {
+  flex: 1 1 0;
+  justify-content: flex-end;
+}
+
+.dw-status-tail {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 40%;
+  margin-left: 8px;
+  flex: 0 1 auto;
 }
 
 .dw-status-item {

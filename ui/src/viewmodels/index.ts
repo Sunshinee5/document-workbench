@@ -218,13 +218,29 @@ export class WorkbenchViewModel {
 
   /** 选择文件并打开：Action(Open) → CoreState → create → Command → Gate → Task → Driver。 */
   async openFile(): Promise<void> {
-    this.update({ error: '', loading: true, status: '正在打开…' });
     try {
       const path = await pickPdfFile();
       if (!path) {
         this.update({ loading: false, status: '已取消打开' });
         return;
       }
+      await this.openPath(path);
+    } catch (error) {
+      this.update({
+        loading: false,
+        error: messageOf(error),
+        status: `打开失败：${messageOf(error)}`,
+      });
+    }
+  }
+
+  /**
+   * 已知本地路径打开（Dashboard 最近文件 / 拖入 PDF）。
+   * 与 openFile 共用同一条 openDocument 链路，不在 UI 里另建保存 / 解析路径。
+   */
+  async openPath(path: string): Promise<void> {
+    this.update({ error: '', loading: true, status: '正在打开…' });
+    try {
       const info: DocumentInfo = await openDocument(path);
       const tabs = [
         ...this.stateValue.tabs.filter((tab) => tab.documentId !== info.document_id),

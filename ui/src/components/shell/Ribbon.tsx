@@ -32,6 +32,12 @@ export interface RibbonProps {
   theme: ThemeMode;
 }
 
+/**
+ * Quick Access 固定四项（规范 26 第一部分 §2）：只引用 RibbonRegistry 已注册命令，
+ * 启停沿用注册项的 needs 谓词，禁止在组件里另写一份动作或禁用规则。
+ */
+const QUICK_COMMAND_IDS = ['save', 'undo', 'redo', 'open'] as const;
+
 /** 一组 Ribbon 按钮：分组标题固定在底部，与 Office 习惯一致。 */
 function RibbonGroup({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -49,10 +55,33 @@ export function Ribbon({ ctx, actions, activeTab, onTabChange }: RibbonProps) {
     .sorted()
     .filter((group: RibbonGroupContribution) => group.tab === activeTab);
   const commands = desktopFramework.registries.ribbonCommands.sorted();
+  const quickCommands = QUICK_COMMAND_IDS
+    .map((id) => desktopFramework.registries.ribbonCommands.get(id))
+    .filter((command): command is NonNullable<typeof command> => Boolean(command));
 
   return (
     <div className="dw-ribbon">
       <nav className="dw-ribbon-tabs" role="tablist" aria-label="功能区">
+        <div className="dw-ribbon-quick" role="toolbar" aria-label="快速访问">
+          {quickCommands.map((command) => {
+            const enabled = desktopFramework.commandEnabled(command.needs, ctx);
+            const reason = command.reason ?? '当前状态不可用';
+            return (
+              <Button
+                key={`quick:${command.id}`}
+                size="sm"
+                className="dw-quick-btn"
+                icon={command.icon}
+                aria-label={command.label}
+                disabled={!enabled}
+                title={enabled ? command.label : `${command.label}：${reason}`}
+                onClick={() => {
+                  if (enabled) command.run(actions);
+                }}
+              />
+            );
+          })}
+        </div>
         {tabs.map((tab) => (
           <button
             key={tab.id}

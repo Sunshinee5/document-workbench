@@ -66,6 +66,24 @@ export interface PageOverlaysProps {
   primaryObjectId?: number | null;
   /** 第19章：当前页 OCR 结果投影（只读，来自 OcrController）。 */
   ocrResults?: OverlayRenderProps['ocrResults'];
+  /** 18 章：当前工具 id（手柄 Hover 光标策略）。 */
+  toolMode?: string;
+  /** 18 章：手柄 Hover → Viewer data-cursor 覆盖。 */
+  onCursorOverride?: (cursor: string | null) => void;
+  /** 18 章：Inline Editor 失焦轻提示。 */
+  notify?: (text: string) => void;
+  /** 第19章：Review 决策只读投影。 */
+  ocrReviews?: OverlayRenderProps['ocrReviews'];
+  /** 第19章：当前激活结果序号。 */
+  ocrActiveIndex?: number | null;
+  /** 第19章：逐结果可 Apply 标记。 */
+  ocrCanApply?: boolean[];
+  /** 第19章：点击 OCR 框设为当前结果。 */
+  onOcrActivate?: (index: number) => void;
+  /** 第19章：Overlay 接受 / 拒绝。 */
+  onOcrDecide?: (index: number, accept: boolean) => void;
+  /** 第19章：Overlay 应用。 */
+  onOcrApply?: (index: number) => void;
 }
 
 /** 单页 Overlay：按注册层顺序渲染，层内按贡献 order 排序。 */
@@ -84,6 +102,15 @@ export function PageOverlays({
   hoverPriority = '',
   primaryObjectId = null,
   ocrResults = [],
+  toolMode = '',
+  onCursorOverride,
+  notify,
+  ocrReviews = [],
+  ocrActiveIndex = null,
+  ocrCanApply = [],
+  onOcrActivate,
+  onOcrDecide,
+  onOcrApply,
 }: PageOverlaysProps) {
   const layers = desktopFramework.registries.overlayLayers.sorted();
   const contributions = desktopFramework.registries.overlays.sorted();
@@ -102,6 +129,15 @@ export function PageOverlays({
     hoverKind,
     primaryObjectId,
     ocrResults,
+    toolMode,
+    onCursorOverride,
+    notify,
+    ocrReviews,
+    ocrActiveIndex,
+    ocrCanApply,
+    onOcrActivate,
+    onOcrDecide,
+    onOcrApply,
   };
 
   return (

@@ -21,6 +21,14 @@
   flex: 0 0 auto;
 }
 
+/* Tooltip 包裹层不能改变导航条列宽（26 第一部分 §3）。 */
+.dw-nav-rail .dw-tooltip {
+  display: flex;
+  justify-content: center;
+  width: 100%;
+  flex: 0 0 auto;
+}
+
 .dw-nav-item {
   display: flex;
   align-items: center;
@@ -240,6 +248,12 @@
   border: 1px solid var(--dw-border);
   border-radius: var(--dw-radius);
   background: var(--dw-surface-2);
+  cursor: pointer;
+}
+
+.dw-ocr-result.is-active {
+  border-color: var(--dw-accent);
+  background: var(--dw-accent-soft);
 }
 
 .dw-ocr-result-head,

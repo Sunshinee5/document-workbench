@@ -4,6 +4,7 @@
 // 18B 起：App 不写任何能力 switch；Ribbon / Inspector / StatusBar / Overlay / 快捷键 /
 // 右键菜单 / 光标全部从 Framework 注册表驱动。新增 OCR 只需 registerFeature。
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Dashboard, recordDashboard } from './components/Dashboard';
 import { PdfViewer, type PageOverlayData, type PdfViewerHandle } from './components/PdfViewer';
 import { Inspector } from './components/inspector';
 import {
@@ -17,11 +18,15 @@ import {
   AnnotationPanel,
   AttachmentsPanel,
   BookmarksPanel,
+  CollaborationPanel,
   DocumentTabs,
   ObjectsPanel,
   OcrWorkspace,
   OutlinePanel,
   PagesPanel,
+  PluginPanel,
+  SearchPanel,
+  SettingsPanel,
   WorkspaceNav,
   type WorkspaceKind,
 } from './components/workspace';
@@ -69,6 +74,7 @@ export default function App() {
   const [inspector, setInspector] = useState<InspectorInfo | null>(null);
   const [expandedNodes, setExpandedNodes] = useState<string[]>([]);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const lastDashboardOcrRef = useRef<number | null>(null);
   const { toasts, push, dismiss } = useToasts();
 
   useEffect(() => viewModel.subscribe(() => setState(viewModel.snapshot)), [viewModel]);
@@ -81,6 +87,37 @@ export default function App() {
   useEffect(() => {
     void ocr.initialize();
   }, [ocr]);
+
+  // Dashboard 最近文件：只记 UI 偏好投影，真值仍来自 ViewModel。
+  useEffect(() => {
+    if (state.activeDocumentId === null || !state.sourcePath) {
+      return;
+    }
+    const title = state.activeTitle || state.sourcePath.split(/[\\/]/).pop() || '未命名文档';
+    recordDashboard('files', {
+      id: state.sourcePath,
+      title,
+      path: state.sourcePath,
+      detail: state.pageCount > 0 ? `${state.pageCount} 页` : undefined,
+    });
+  }, [state.activeDocumentId, state.activeTitle, state.sourcePath, state.pageCount]);
+
+  // Dashboard 最近 OCR：每个会话只记一次，重复轮询不产生重复条目。
+  useEffect(() => {
+    const session = ocrState.session;
+    if (session.state !== 'Completed' || session.session_id === 0) {
+      return;
+    }
+    if (lastDashboardOcrRef.current === session.session_id) {
+      return;
+    }
+    lastDashboardOcrRef.current = session.session_id;
+    recordDashboard('ocr', {
+      id: `ocr:${session.session_id}`,
+      title: state.activeTitle ? `OCR · ${state.activeTitle}` : 'OCR 识别完成',
+      detail: `${session.results.length} 条结果`,
+    });
+  }, [ocrState.session, state.activeTitle]);
 
   // HiDPI（规范 20 §五）：WebView 已处理像素缩放，这里只登记 DPR 供 CSS Token 使用。
   useEffect(() => {
@@ -181,12 +218,22 @@ export default function App() {
       ? `已保存 ${state.lastSavedAt}`
       : '—';
   const ocrAvailable = ocrState.providers.some((provider) => provider.available);
-  const firstOcrResult = ocrState.session.results[0];
-  const firstOcrReview = ocrState.session.reviews[0];
+  // 当前 OCR 结果（Overlay / Workspace / Inspector / Ribbon 共用同一只读序号）。
+  const activeOcrIndex = ocrState.activeIndex ?? 0;
+  const activeOcrResult = ocrState.session.results[activeOcrIndex];
+  const activeOcrReview = ocrState.session.reviews[activeOcrIndex];
   const ocrApplyable = Boolean(
-    firstOcrResult
-    && firstOcrResult.source_object_id !== null
-    && firstOcrReview?.decision === '已接受',
+    activeOcrResult
+    && activeOcrResult.source_object_id !== null
+    && activeOcrReview?.decision === '已接受',
+  );
+  const ocrCanApply = useMemo(
+    () => ocrState.session.results.map((result, index) => (
+      result.source_object_id !== null
+      && ocrState.session.reviews[index]?.decision === '已接受'
+      && !ocrState.applying
+    )),
+    [ocrState.session.results, ocrState.session.reviews, ocrState.applying],
   );
 
   // 选择校验摘要（只读投影）：primary 必须属于 selected，且选择页与当前页一致。
@@ -241,6 +288,12 @@ export default function App() {
     ocrResultCount: ocrState.session.results.length,
     ocrAvailable,
     ocrApplyable,
+    ocrProvider: activeOcrResult?.provider || ocrState.provider,
+    ocrConfidence: activeOcrResult?.confidence ?? null,
+    ocrActiveIndex: ocrState.activeIndex,
+    ocrActiveText: activeOcrResult?.text ?? '',
+    // 第21章 Search 尚未接入：StatusBar 读取此投影显示「搜索未就绪」。
+    searchStateLabel: '搜索未就绪',
   }), [
     mode, theme, state.activeDocumentId, state.currentPage, state.pageCount, state.zoom,
     editorState.capability, editorState.selection, editorState.editing, editorState.hover,
@@ -248,6 +301,8 @@ export default function App() {
     parserText, saveText, state.taskEvent, state.error,
     toolLabel, hoverPriority, selectionValidation, feedback.saveFeedback, feedback.saveMessage, feedback.lastEvent,
     ocrState.session.state_label, ocrState.session.progress, ocrState.session.results.length, ocrAvailable, ocrApplyable,
+    ocrState.provider, activeOcrResult?.provider, activeOcrResult?.confidence, activeOcrResult?.text,
+    ocrState.activeIndex,
   ]);
 
   // ---- FrameworkActions：意图转发，注册表只声明不持有 ViewModel ----
@@ -295,6 +350,13 @@ export default function App() {
 
   const actions = useMemo<FrameworkActions>(() => ({
     open: () => void viewModel.openFile().then(pollFeedback),
+    // Ctrl+F：切到唯一 Search Workspace 并展开侧栏，不新增第二套搜索 UI。
+    openGlobalSearch: () => {
+      setWorkspace('search');
+      setNavCollapsed(false);
+    },
+    // Dashboard 最近文件 / 拖入：同一条 Open 链路，只是路径已知。
+    openPath: (path) => void viewModel.openPath(path).then(pollFeedback),
     save: () => {
       eventBridge.markSaving();
       void viewModel.save().then(() => {
@@ -383,9 +445,15 @@ export default function App() {
     ocrResume: () => void ocr.resume().then(checkOcrError),
     ocrCancel: () => void ocr.cancel().then(checkOcrError),
     ocrApply: (index) => void ocr.apply(index).then(acceptCommit),
+    ocrApplyActive: () => void ocr.apply(ocrState.activeIndex ?? 0).then(acceptCommit),
     searchInOcr: () => {
       setWorkspace('ocr');
       setRibbonTab('ocr');
+      recordDashboard('search', {
+        id: `search:${Date.now()}`,
+        title: 'OCR 结果内查找',
+        detail: `${ctx.ocrResultCount} 条结果`,
+      });
     },
     ocrCopyResult: () => {
       const text = ocr.results[0]?.text ?? '';
@@ -404,7 +472,7 @@ export default function App() {
     },
   }), [
     viewModel, editor, refreshEditor, pollFeedback, eventBridge, push, acceptCommit, startOcr, checkOcrError,
-    ocr, state.pageCount, state.currentPage, state.objectTree,
+    ocr, ocrState.activeIndex, state.pageCount, state.currentPage, state.objectTree,
     editorState.selection.primary, editorState.page, ctx,
   ]);
 
@@ -445,6 +513,30 @@ export default function App() {
       editor.setMode('edit');
     })();
   }, [editor]);
+
+  /**
+   * 18 章框选：Core 没有批量选择 IPC，沿用 editor.select 串行调用。
+   * 先选最后一个再倒序追加，使 Core 的「primary = 最后命中」最终落在框选第一个对象。
+   * 只在全部完成后 pollFeedback 一次，避免滚动 / 命令事件反复拉取。
+   */
+  const handleFrameSelect = useCallback((page: number, objectIds: number[]) => {
+    void (async () => {
+      await editor.clearSelection(page);
+      if (objectIds.length === 0) {
+        pollFeedback();
+        return;
+      }
+      for (let index = objectIds.length - 1; index >= 0; index -= 1) {
+        const objectId = objectIds[index];
+        if (index === objectIds.length - 1) {
+          await editor.select(page, objectId);
+        } else {
+          await editor.select(page, objectId, { multi: true, shift: true });
+        }
+      }
+      pollFeedback();
+    })();
+  }, [editor, pollFeedback]);
 
   // ---- 快捷键：遍历 ShortcutRegistry，无 switch ----
   useEffect(() => {
@@ -501,11 +593,15 @@ export default function App() {
   const hasDocument = state.activeDocumentId !== null;
 
   // 第19章：Busy / Forbidden 也走同一个 data-cursor 出口，不新增第二套光标管理。
-  const cursorKind = ocrState.session.state === 'Running'
+  const resolvedCursor = ocrState.session.state === 'Running'
     ? 'busy'
     : desktopFramework.registries.tools.get(mode)?.enabled(ctx) === false
       ? 'forbidden'
       : desktopFramework.resolveCursor(mode);
+  // 18 章：浏览 / 选择工具下 Hover 到对象时，按同一 CursorManager 结果叠加 move 语义。
+  const cursorKind = (resolvedCursor === 'arrow' || resolvedCursor === 'cross') && editorState.hover
+    ? 'move'
+    : resolvedCursor;
 
   // ---- 右键菜单项：来自 ContextMenuRegistry ----
   const menuItems = useMemo<MenuItemView[]>(() => {
@@ -575,10 +671,16 @@ export default function App() {
             onDecide={(index, accept) => void ocr.decide(index, accept)}
             onApply={(index) => void ocr.apply(index).then(acceptCommit)}
             onClearCache={() => void ocr.clearCache()}
+            activeIndex={ocrState.activeIndex}
+            onActivate={(index) => ocr.setActiveIndex(index)}
           />
         );
       case 'annotation': return <AnnotationPanel />;
       case 'ai': return <AiPanel />;
+      case 'search': return <SearchPanel />;
+      case 'plugin': return <PluginPanel />;
+      case 'settings': return <SettingsPanel />;
+      case 'collaboration': return <CollaborationPanel />;
       default: return null;
     }
   })();
@@ -622,39 +724,52 @@ export default function App() {
             onClose={(documentId) => void viewModel.closeTab(documentId)}
           />
           <div className="dw-canvas">
-            <PdfViewer
-              ref={viewerRef}
-              documentId={state.activeDocumentId}
-              zoom={state.zoom}
-              currentPage={state.currentPage}
-              onPageCount={handlePageCount}
-              onPageChange={handlePageChange}
-              onScroll={handleScroll}
-              onFitZoom={handleFitZoom}
-              onError={handleError}
-              pageOrder={state.pageOrder}
-              rotations={state.rotations}
-              selectedPages={state.selectedPages}
-              layoutRevision={state.layoutRevision}
-              saveRevision={state.saveRevision}
-              onSelectPage={(page, selectMode) => void viewModel.selectPages([page], selectMode)}
-              overlayPages={overlayPages}
-              hoverObjectId={editorState.hover?.object_id ?? null}
-              selectedObjectIds={editorState.selection.selected}
-              editingObjectId={editorState.editing.objectId}
-              editingText={inspector?.text?.unicode ?? ''}
-              onCommitText={(text) => actions.replaceText(text)}
-              onCancelEdit={() => actions.cancel()}
-              hoverKind={editorState.hover?.kind_label ?? ''}
-              hoverPriority={hoverPriority}
-              primaryObjectId={editorState.selection.primary}
-              cursorKind={cursorKind}
-              onPagePointerMove={handlePointerMove}
-              onPagePointerLeave={handlePointerLeave}
-              onPageClick={handlePageClick}
-              onPageDoubleClick={handlePageDoubleClick}
-              onPageContextMenu={(x, y) => setContextMenu({ x, y })}
-            />
+            {hasDocument ? (
+              <PdfViewer
+                ref={viewerRef}
+                documentId={state.activeDocumentId}
+                zoom={state.zoom}
+                currentPage={state.currentPage}
+                onPageCount={handlePageCount}
+                onPageChange={handlePageChange}
+                onScroll={handleScroll}
+                onFitZoom={handleFitZoom}
+                onError={handleError}
+                pageOrder={state.pageOrder}
+                rotations={state.rotations}
+                selectedPages={state.selectedPages}
+                layoutRevision={state.layoutRevision}
+                saveRevision={state.saveRevision}
+                onSelectPage={(page, selectMode) => void viewModel.selectPages([page], selectMode)}
+                overlayPages={overlayPages}
+                hoverObjectId={editorState.hover?.object_id ?? null}
+                selectedObjectIds={editorState.selection.selected}
+                editingObjectId={editorState.editing.objectId}
+                editingText={inspector?.text?.unicode ?? ''}
+                onCommitText={(text) => actions.replaceText(text)}
+                onCancelEdit={() => actions.cancel()}
+                hoverKind={editorState.hover?.kind_label ?? ''}
+                hoverPriority={hoverPriority}
+                primaryObjectId={editorState.selection.primary}
+                cursorKind={cursorKind}
+                toolMode={mode}
+                onFrameSelect={handleFrameSelect}
+                onNotify={(text) => push(text, 'info')}
+                ocrReviews={ocrState.session.reviews}
+                ocrActiveIndex={ocrState.activeIndex}
+                ocrCanApply={ocrCanApply}
+                onOcrActivate={(index) => ocr.setActiveIndex(index)}
+                onOcrDecide={(index, accept) => void ocr.decide(index, accept).then(checkOcrError)}
+                onOcrApply={(index) => void ocr.apply(index).then(acceptCommit)}
+                onPagePointerMove={handlePointerMove}
+                onPagePointerLeave={handlePointerLeave}
+                onPageClick={handlePageClick}
+                onPageDoubleClick={handlePageDoubleClick}
+                onPageContextMenu={(x, y) => setContextMenu({ x, y })}
+              />
+            ) : (
+              <Dashboard actions={actions} />
+            )}
             <ToastStack toasts={toasts} onDismiss={dismiss} />
           </div>
         </div>

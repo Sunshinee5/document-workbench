@@ -63,11 +63,25 @@ export interface FrameworkContext {
   ocrAvailable: boolean;
   /** 第19章：首个结果是否已接受且可写回文本对象。 */
   ocrApplyable: boolean;
+  /** 第19章投影：当前 OCR Provider 名（没有数据时由 Inspector 显示「—」）。 */
+  ocrProvider?: string;
+  /** 第19章投影：首条 OCR 结果的置信度 0..1（没有数据时显示「—」）。 */
+  ocrConfidence?: number | null;
+  /** 第19章投影：当前 OCR 结果序号（Overlay 与 Workspace 共用，只读）。 */
+  ocrActiveIndex?: number | null;
+  /** 第19章投影：当前 OCR 结果文本（Inspector 展示用）。 */
+  ocrActiveText?: string;
+  /** 第21章占位投影：Search 状态文案；未接入时由 StatusBar 显示「搜索未就绪」。 */
+  searchStateLabel?: string;
 }
 
 /** App 注入的动作集合：注册表只声明意图，不持有 ViewModel / IPC。 */
 export interface FrameworkActions {
   open(): void;
+  /** Ctrl+F：打开 / 聚焦 Search Workspace（21 章占位入口，任何状态可用）。 */
+  openGlobalSearch?(): void;
+  /** Dashboard 拖入 / 最近文件：按已知本地路径打开，仍走唯一 Open 链路。 */
+  openPath?(path: string): void;
   save(): void;
   saveAs(): void;
   undo(): void;
@@ -96,6 +110,8 @@ export interface FrameworkActions {
   ocrResume(): void;
   ocrCancel(): void;
   ocrApply(index: number): void;
+  /** 应用当前激活的 OCR 结果（Overlay / Workspace 共用的只读序号）。 */
+  ocrApplyActive?(): void;
   /** Ctrl+F：OCR 结果内检索（全文 Search 属 21 章）。 */
   searchInOcr(): void;
   /** 复制首个 OCR 结果文本（不属对象剪贴板编辑）。 */
@@ -196,6 +212,24 @@ export interface OverlayRenderProps {
     confidence: number;
     text: string;
   }>;
+  /** 18 章：当前工具 id，用于 Overlay 手柄的 Hover 光标策略。 */
+  toolMode?: string;
+  /** 18 章：Overlay 手柄 Hover 时覆盖 Viewer 的 data-cursor（离开传 null 复原）。 */
+  onCursorOverride?: (cursor: string | null) => void;
+  /** 18 章：非模态轻提示（Inline Editor 失焦提示）；由 App 注入唯一 ToastStack。 */
+  notify?: (text: string) => void;
+  /** 第19章：Review 决策只读投影（result_index → decision）。 */
+  ocrReviews?: Array<{ result_index: number; decision: string }>;
+  /** 第19章：当前激活结果序号；Overlay 与 Workspace 共用同一只读投影。 */
+  ocrActiveIndex?: number | null;
+  /** 第19章：逐结果是否可 Apply（已接受且有 source_object_id）。 */
+  ocrCanApply?: boolean[];
+  /** 第19章：点击 OCR 框设为当前结果。 */
+  onOcrActivate?: (index: number) => void;
+  /** 第19章：Overlay 轻操作条接受 / 拒绝，转发 OcrController.decide。 */
+  onOcrDecide?: (index: number, accept: boolean) => void;
+  /** 第19章：Overlay 轻操作条应用，转发 OcrController.apply → Editing Engine。 */
+  onOcrApply?: (index: number) => void;
 }
 
 /** 对象几何投影（不是 Object 真值）；由对象树 IPC 快照投影得到。 */
@@ -366,11 +400,16 @@ export interface DockPane {
 /** 自定义状态项渲染（页码输入等交互项），只收投影与动作。 */
 export type StatusRender = (ctx: FrameworkContext, actions: FrameworkActions) => ReactNode;
 
+/** 状态栏分组：左 / 中 / 右；缺省归入左组（兼容既有注册项）。 */
+export type StatusGroup = 'left' | 'center' | 'right';
+
 /** 一个状态栏项：value 或 render 二选一。 */
 export interface StatusItem {
   id: string;
   label: string;
   order: number;
+  /** 所属分组；未声明时按左组处理，不改变既有注册表语义。 */
+  group?: StatusGroup;
   value?: (ctx: FrameworkContext) => string;
   tone?: (ctx: FrameworkContext) => 'danger' | 'warn' | 'ok' | undefined;
   render?: StatusRender;

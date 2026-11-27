@@ -46,7 +46,11 @@ export type IconName =
   | 'text'
   | 'path'
   | 'unknown'
-  | 'warning';
+  | 'warning'
+  // 26 章追加的语义图标：只增不改既有字形值。
+  | 'search'
+  | 'plugin'
+  | 'settings';
 
 /** 文本符号表：键即语义，值为展示字符。 */
 const GLYPHS: Record<IconName, string> = {
@@ -93,6 +97,10 @@ const GLYPHS: Record<IconName, string> = {
   path: '⌇',
   unknown: '?',
   warning: '⚠',
+  // 语义专用字形：与 OCR / 对象 / 图层脱钩，均为 Windows 系统字体常见符号。
+  search: '⌕',
+  plugin: '⊞',
+  settings: '⚙',
 };
 
 /** 图标组件：装饰性元素，统一 aria-hidden，语义由外层按钮文案承担。 */
