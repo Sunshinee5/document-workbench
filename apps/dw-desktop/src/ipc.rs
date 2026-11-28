@@ -1544,18 +1544,28 @@ pub fn editor_hit_test(
     Ok(editor.hit_test(page, x, y, page_width_px, rotation))
 }
 
+/// 解析 IPC 传入的 u64 对象标识：前端以十进制字符串传输，避免 JS number 丢精度。
+///
+/// 命令参数是裸标量，不能像 DTO 字段那样挂 `#[serde(with = ...)]`，
+/// 因此在命令入口处显式 parse。document_id 由 session 分配、是小整数，保持 u64。
+fn parse_object_id(text: &str) -> Result<u64, String> {
+    text.parse::<u64>()
+        .map_err(|_| format!("对象标识非法：{}", text))
+}
+
 /// 写选择（唯一真值在 Session.selection_state）。
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub fn editor_select(
     document_id: u64,
     page: u32,
-    object_id: u64,
+    object_id: String,
     multi: bool,
     ctrl: bool,
     shift: bool,
     state: tauri::State<'_, CoreState>,
 ) -> Result<EditorSnapshot, String> {
+    let object_id = parse_object_id(&object_id)?;
     let mut manager = lock(&state.session_manager);
     let session = manager
         .active_mut()
@@ -1622,10 +1632,11 @@ pub fn editor_select_all(
 #[tauri::command]
 pub fn editor_begin_edit(
     document_id: u64,
-    object_id: u64,
+    object_id: String,
     text: String,
     state: tauri::State<'_, CoreState>,
 ) -> Result<EditorSnapshot, String> {
+    let object_id = parse_object_id(&object_id)?;
     let manager = lock(&state.session_manager);
     let session = manager
         .active()
@@ -1724,9 +1735,10 @@ pub fn editor_cancel(
 /// Inspector 数据：只读投影。
 #[tauri::command]
 pub fn editor_inspector(
-    object_id: u64,
+    object_id: String,
     state: tauri::State<'_, CoreState>,
 ) -> Result<Option<InspectorInfo>, String> {
+    let object_id = parse_object_id(&object_id)?;
     let editor = lock(&state.editor);
     Ok(editor.inspector(object_id))
 }
@@ -2305,4 +2317,26 @@ pub fn ocr_clear_cache(state: tauri::State<'_, CoreState>) -> usize {
     let mut runtime = lock(&state.ocr);
     runtime.cache.clear();
     0
+}
+
+#[cfg(test)]
+mod precision_tests {
+    use super::parse_object_id;
+
+    /// 前端传回的 19 位对象标识字符串必须原样解析为 u64。
+    #[test]
+    fn command_argument_parses_large_object_id() {
+        for text in ["1617674655699130457", "31774738392861546"] {
+            let parsed = parse_object_id(text).expect("大整数字符串必须解析成功");
+            assert_eq!(parsed.to_string(), text);
+        }
+    }
+
+    /// 非法字符串必须显式报错，不能静默变成 0 或截断。
+    #[test]
+    fn command_argument_rejects_invalid_text() {
+        assert!(parse_object_id("").is_err());
+        assert!(parse_object_id("不是数字").is_err());
+        assert!(parse_object_id("18446744073709551616").is_err());
+    }
 }
