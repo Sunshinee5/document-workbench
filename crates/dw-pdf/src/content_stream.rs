@@ -4,6 +4,7 @@
 //! 其余 Operator 一律产出中间节点，最终由 ObjectMapper 转成 `UnknownObject`，
 //! 禁止静默丢弃。损坏的内容流按行降级解析，保证页面与文档仍能打开。
 
+use dw_core::coordinate::PdfPoint;
 use dw_core::error::DriverError;
 use dw_core::object::{BBox, Transform};
 use dw_core::page::PageId;
@@ -47,7 +48,7 @@ impl ContentStreamParser {
         };
 
         let mut streams: Vec<(LopdfObjectId, &LopdfObject)> = Vec::new();
-        collect_streams(pdf, contents, 0, &mut streams, context.page_id(), warnings);
+        collect_streams(pdf, contents, 0, None, &mut streams, context.page_id(), warnings);
 
         let mut nodes = Vec::new();
         let mut z_index = 0_i32;
@@ -85,6 +86,10 @@ impl ContentStreamParser {
         let resources = ResourceParser::new();
         let mut nodes = Vec::new();
         let mut text_matrix = Transform::IDENTITY;
+        // 当前变换矩阵：PDF 的 `cm` 链（含 y 翻转与缩放）必须参与 bbox 计算，
+        // 否则对象停留在未变换的用户空间，和页面坐标 / 屏幕命中测试完全错位。
+        let mut ctm = Transform::IDENTITY;
+        let mut ctm_stack: Vec<Transform> = Vec::new();
         let mut font_id: Option<String> = None;
         let mut font_size = 12.0_f64;
 
@@ -117,8 +122,12 @@ impl ContentStreamParser {
                 "Td" => {
                     let dx = operand_number(operation.operands.first()).unwrap_or(0.0);
                     let dy = operand_number(operation.operands.get(1)).unwrap_or(0.0);
-                    text_matrix.e += dx;
-                    text_matrix.f += dy;
+                    // PDF 规范：Td 先构造平移矩阵，再左乘到当前文本矩阵。
+                    // 直接改 e/f 只对不带旋转 / 缩放的 Tm 成立。
+                    text_matrix = compose(
+                        Transform::new(1.0, 0.0, 0.0, 1.0, dx, dy),
+                        text_matrix,
+                    );
                 }
                 "Tj" | "TJ" => {
                     // 编码宽度由字体决定：Identity / Type0 是双字节码，简单字体是单字节码。
@@ -133,7 +142,7 @@ impl ContentStreamParser {
                     let (glyphs, raw) = collect_text(&operation.operands, two_byte);
                     let unicode =
                         decode_unicode(pdf, context, font_id.as_deref(), &glyphs, raw.as_deref());
-                    let bbox = text_bbox(text_matrix, font_size, glyphs.len());
+                    let bbox = text_bbox(text_matrix, ctm, font_size, glyphs.len());
                     let mut node = IntermediateNode::new(
                         source,
                         index,
@@ -150,7 +159,10 @@ impl ContentStreamParser {
                     *z_index += 1;
                     // 同一行后续的 Tj 需要沿文本行前进，避免全部对象重叠。
                     let advance = glyphs_len(&operation.operands, two_byte) as f64 * font_size * 0.6;
-                    text_matrix.e += advance * text_matrix.a.abs();
+                    text_matrix = compose(
+                        Transform::new(1.0, 0.0, 0.0, 1.0, advance, 0.0),
+                        text_matrix,
+                    );
                 }
                 "Do" => {
                     let name = operand_name(operation.operands.first());
@@ -159,12 +171,9 @@ impl ContentStreamParser {
                         .and_then(|name| resources.xobject(pdf, context, name))
                         .filter(|resource| resource.subtype.contains("Image"))
                         .map(|resource| {
-                            let bbox = BBox::new(
-                                0.0,
-                                0.0,
-                                f64::from(resource.width),
-                                f64::from(resource.height),
-                            );
+                            // Do 把 XObject 的单位正方形 [0,1]² 经 CTM 映射到页面。
+                            // 像素宽高只用于 Inspector 的 DPI 推算，不是页面点数。
+                            let bbox = transform_bbox(ctm, BBox::new(0.0, 0.0, 1.0, 1.0));
                             let image = IntermediateImage {
                                 xref: resource.xref,
                                 width: resource.width,
@@ -198,7 +207,10 @@ impl ContentStreamParser {
                         .filter_map(operand_number_of)
                         .collect();
                     let bbox = if values.len() == 4 {
-                        BBox::new(values[0], values[1], values[2], values[3])
+                        transform_bbox(
+                            ctm,
+                            BBox::new(values[0], values[1], values[2], values[3]),
+                        )
                     } else {
                         BBox::default()
                     };
@@ -213,6 +225,23 @@ impl ContentStreamParser {
                     *z_index += 1;
                 }
                 other => {
+                    // 图形状态 Operator 仍按既有语义保留为 UnknownObject 节点，
+                    // 同时在这里维护 CTM 栈，保证后续对象的 bbox 落在页面坐标系。
+                    match other {
+                        "q" => ctm_stack.push(ctm),
+                        "Q" => {
+                            if let Some(previous) = ctm_stack.pop() {
+                                ctm = previous;
+                            }
+                        }
+                        "cm" => {
+                            if let Some(matrix) = matrix_of(&operation.operands) {
+                                // PDF：`CTM_new = M × CTM_old`（行向量约定下先应用 M）。
+                                ctm = compose(matrix, ctm);
+                            }
+                        }
+                        _ => {}
+                    }
                     // 未知 Operator 也生成中间节点：由 ObjectMapper 转成 UnknownObject。
                     nodes.push(IntermediateNode::new(
                         source,
@@ -235,6 +264,7 @@ fn collect_streams<'a>(
     pdf: &'a LopdfDocument,
     value: &'a LopdfObject,
     depth: u8,
+    owner: Option<LopdfObjectId>,
     streams: &mut Vec<(LopdfObjectId, &'a LopdfObject)>,
     page_id: PageId,
     warnings: &mut Vec<ParseWarning>,
@@ -250,7 +280,9 @@ fn collect_streams<'a>(
         LopdfObject::Reference(_) => {
             let (xref, target) = pdf.dereference(value).unwrap_or((None, value));
             match xref {
-                Some(_id) => collect_streams(pdf, target, depth + 1, streams, page_id, warnings),
+                Some(id) => {
+                    collect_streams(pdf, target, depth + 1, Some(id), streams, page_id, warnings)
+                }
                 None => warnings.push(ParseWarning::new(
                     Some(page_id),
                     "内容流引用无法解析，已跳过".to_string(),
@@ -259,16 +291,10 @@ fn collect_streams<'a>(
         }
         LopdfObject::Array(items) => {
             for item in items {
-                collect_streams(pdf, item, depth + 1, streams, page_id, warnings);
+                collect_streams(pdf, item, depth + 1, owner, streams, page_id, warnings);
             }
         }
-        LopdfObject::Stream(_) => streams.push((
-            pdf.dereference(value)
-                .ok()
-                .and_then(|(id, _)| id)
-                .unwrap_or((0, 0)),
-            value,
-        )),
+        LopdfObject::Stream(_) => streams.push((owner.unwrap_or((0, 0)), value)),
         _ => warnings.push(ParseWarning::new(
             Some(page_id),
             "内容流包含非流对象，已跳过".to_string(),
@@ -291,11 +317,9 @@ fn parse_operations(
             return content.operations;
         }
     }
-    warnings.push(ParseWarning::new(
-        Some(page_id),
-        format!("内容流 {:?} 存在损坏 Operator，已启用逐行恢复", xref),
-    ));
-
+    // 多行是合法内容流的常态，只有真的出现坏行才升级为警告。
+    // 否则每个正常 PDF 都会在 Inspector 里显示无意义的「解析器：警告 N」。
+    let mut line_warnings: Vec<ParseWarning> = Vec::new();
     let mut operations = Vec::new();
     let text = String::from_utf8_lossy(bytes);
     for (line_index, line) in text.lines().enumerate() {
@@ -306,7 +330,7 @@ fn parse_operations(
             if content.operations.is_empty() {
                 // lopdf 会静默丢弃无法识别的行（如 "@@@ broken"）；
                 // 规范 §十/§十八要求保留为 corrupted 并记 Warning。
-                warnings.push(ParseWarning::new(
+                line_warnings.push(ParseWarning::new(
                     Some(page_id),
                     format!("第 {} 行 Operator 无法识别，已保留原文：{}", line_index + 1, line.trim()),
                 ));
@@ -318,7 +342,7 @@ fn parse_operations(
                 operations.extend(content.operations);
             }
         } else {
-            warnings.push(ParseWarning::new(
+            line_warnings.push(ParseWarning::new(
                 Some(page_id),
                 format!(
                     "第 {} 行 Operator 损坏，已保留原文：{}",
@@ -334,6 +358,13 @@ fn parse_operations(
                 )],
             });
         }
+    }
+    if !line_warnings.is_empty() {
+        warnings.push(ParseWarning::new(
+            Some(page_id),
+            format!("内容流 {:?} 存在损坏 Operator，已启用逐行恢复", xref),
+        ));
+        warnings.extend(line_warnings);
     }
     operations
 }
@@ -443,11 +474,71 @@ fn decode_unicode(
         .map(str::to_string)
 }
 
-/// 由文本矩阵与字号推导 PDF 坐标下的近似真实边界。
-fn text_bbox(matrix: Transform, font_size: f64, glyph_count: usize) -> BBox {
-    let height = font_size.abs() * matrix.d.abs().max(1e-6);
-    let width = glyph_count as f64 * font_size.abs() * 0.6 * matrix.a.abs().max(1e-6);
-    BBox::new(matrix.e, matrix.f - font_size.abs() * 0.2, width, height)
+/// 由文本矩阵、CTM 与字号推导页面 PDF 坐标下的近似真实边界。
+///
+/// 字形先在文本空间量出粗略边界，再依次经过 `Tm` 与 `cm` 链映射到页面坐标；
+/// 少了任何一步，命中测试拿到的 bbox 都不在页面坐标系里。
+fn text_bbox(matrix: Transform, ctm: Transform, font_size: f64, glyph_count: usize) -> BBox {
+    let height = font_size.abs().max(1e-6);
+    let width = (glyph_count as f64 * font_size.abs() * 0.6).max(1e-6);
+    let local = BBox::new(0.0, -font_size.abs() * 0.2, width, height);
+    transform_bbox(compose(matrix, ctm), local)
+}
+
+/// 从 `cm` 的 6 个操作数构造矩阵；非有限数按单位矩阵处理。
+fn matrix_of(operands: &[LopdfObject]) -> Option<Transform> {
+    if operands.len() < 6 {
+        return None;
+    }
+    let values: Vec<f64> = operands
+        .iter()
+        .take(6)
+        .filter_map(operand_number_of)
+        .collect();
+    if values.len() != 6 || values.iter().any(|value| !value.is_finite()) {
+        return None;
+    }
+    Some(Transform::new(
+        values[0], values[1], values[2], values[3], values[4], values[5],
+    ))
+}
+
+/// 行向量约定下的矩阵复合：先应用 `first`，再应用 `second`。
+fn compose(first: Transform, second: Transform) -> Transform {
+    Transform {
+        a: first.a * second.a + first.b * second.c,
+        b: first.a * second.b + first.b * second.d,
+        c: first.c * second.a + first.d * second.c,
+        d: first.c * second.b + first.d * second.d,
+        e: first.e * second.a + first.f * second.c + second.e,
+        f: first.e * second.b + first.f * second.d + second.f,
+    }
+}
+
+/// 仿射变换一个点。
+fn transform_point(matrix: Transform, x: f64, y: f64) -> PdfPoint {
+    PdfPoint::new(
+        matrix.a * x + matrix.c * y + matrix.e,
+        matrix.b * x + matrix.d * y + matrix.f,
+    )
+}
+
+/// 仿射变换一个矩形并归一化为正宽高 BBox（支持 y 翻转 / 旋转）。
+fn transform_bbox(matrix: Transform, bbox: BBox) -> BBox {
+    let corners = [
+        transform_point(matrix, bbox.x, bbox.y),
+        transform_point(matrix, bbox.x + bbox.width, bbox.y),
+        transform_point(matrix, bbox.x + bbox.width, bbox.y + bbox.height),
+        transform_point(matrix, bbox.x, bbox.y + bbox.height),
+    ];
+    let min_x = corners.iter().map(|point| point.x).fold(f64::INFINITY, f64::min);
+    let max_x = corners.iter().map(|point| point.x).fold(f64::NEG_INFINITY, f64::max);
+    let min_y = corners.iter().map(|point| point.y).fold(f64::INFINITY, f64::min);
+    let max_y = corners.iter().map(|point| point.y).fold(f64::NEG_INFINITY, f64::max);
+    if !min_x.is_finite() || !min_y.is_finite() || !max_x.is_finite() || !max_y.is_finite() {
+        return BBox::default();
+    }
+    BBox::new(min_x, min_y, max_x - min_x, max_y - min_y)
 }
 
 /// lopdf Object → JSON：不依赖 lopdf 类型，UnknownObject 可原样保存与写回。
