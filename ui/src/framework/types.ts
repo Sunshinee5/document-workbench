@@ -241,6 +241,8 @@ export interface OverlayObject {
   /** u64 对象标识的字符串形式，与 hit/select/inspector 全线同类型。 */
   objectId: string;
   bbox: [number, number, number, number];
+  /** 对象种类英文枚举名（Text / Image / Path），供编辑态校验对象类型。 */
+  kind: string;
 }
 
 /** 一个覆盖层贡献：layer id 决定层级，render 决定内容。 */

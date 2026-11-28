@@ -2,7 +2,7 @@
 //
 // 行为必须与 18A 完全一致：浏览 / 对象选择 / 文字编辑 / 保存链路不变。
 // 这里只做「声明化改造」，不新增业务：每条命令 / 分区 / 层都是注册项。
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, PanelEmpty, PropertyGrid, PropertySection, type PropertyRow } from '../components/ui';
 import type { InspectorInfo } from '../ipc';
 import type {
@@ -111,9 +111,22 @@ function renderSelectionOverlay(props: OverlayRenderProps) {
 
 /** Inline Text Editor（18C AD-26）：编辑态浮在对象 BBox 上，唯一页面内输入入口。 */
 function InlineTextEditor({ props }: { props: OverlayRenderProps }) {
-  const [draft, setDraft] = useState(props.editingText ?? '');
-  useEffect(() => setDraft(props.editingText ?? ''), [props.editingObjectId, props.editingText]);
-  const object = props.objects.find((item) => item.objectId === props.editingObjectId);
+  const editingObjectId = props.editingObjectId;
+  const initialText = props.editingText ?? '';
+  const [draft, setDraft] = useState(initialText);
+  // 草稿是编辑事务的输入：只有 editingObjectId 真正切换到另一个对象时才重置。
+  // inspector / revision 变化会让 editingText 变空，绝不能因此清空用户正在输入的内容（白框根因）。
+  const lastObjectIdRef = useRef(editingObjectId);
+  useEffect(() => {
+    if (lastObjectIdRef.current !== editingObjectId) {
+      lastObjectIdRef.current = editingObjectId;
+      setDraft(initialText);
+      return;
+    }
+    // 初值只在草稿为空时补入；非空草稿一律保留，不被外部投影覆盖。
+    setDraft((current) => (current.length === 0 && initialText.length > 0 ? initialText : current));
+  }, [editingObjectId, initialText]);
+  const object = props.objects.find((item) => item.objectId === editingObjectId);
   if (!object) return null;
   const box = projectBox(object.bbox, props.pageWidth, props.pageHeight, props.rotation);
   return (
@@ -145,7 +158,7 @@ function InlineTextEditor({ props }: { props: OverlayRenderProps }) {
         onBlur={() => {
           // 失焦不自动提交：避免点击 Inspector 时产生双提交；提交仍走 Enter / Ribbon。
           // 有未提交改动时用唯一 ToastStack 轻提示，不弹 alert / dialog。
-          if (draft !== (props.editingText ?? '')) {
+          if (draft !== initialText) {
             props.notify?.('文本修改未提交，按 Enter 保存或 Esc 取消');
           }
         }}
@@ -173,7 +186,11 @@ function InlineTextEditor({ props }: { props: OverlayRenderProps }) {
 
 /** editing 层注册项：Inline Editor（草稿是事务输入，不进注册表）。 */
 function renderEditingOverlay(props: OverlayRenderProps) {
-  return props.editingObjectId !== null ? <InlineTextEditor props={props} /> : null;
+  if (props.editingObjectId === null) return null;
+  // 非文本对象（Path / Image）不得渲染页面内编辑框：避免编辑对象与 Inspector 主选不一致时误编辑。
+  const object = props.objects.find((item) => item.objectId === props.editingObjectId);
+  if (!object || object.kind !== 'Text') return null;
+  return <InlineTextEditor props={props} />;
 }
 
 /** OCR Overlay（第19章 / 规范 26 第三部分）：BBox + Hover 轻操作条，不直接写文档。 */
@@ -274,10 +291,19 @@ function TextInspectorSection({ inspector, focusedPageRotation, ctx, actions }: 
   const text = inspector?.text ?? null;
   const [draft, setDraft] = useState('');
   const editingActive = ctx.editing.active;
-  // 进入编辑态时把对象原文灌进草稿：否则草稿为空，直接回车会把对象文本清空。
+  const editingObjectId = ctx.editing.objectId;
+  const previousEditRef = useRef({ active: false, objectId: null as string | null });
+  // 只在「刚进入编辑态 / 编辑对象切换」时灌入原文：inspector 随 primary 刷新不得清空用户草稿。
   useEffect(() => {
-    if (editingActive) setDraft(text?.unicode ?? '');
-  }, [editingActive, text?.unicode]);
+    const previous = previousEditRef.current;
+    const activated = !previous.active && editingActive;
+    const switched = previous.objectId !== editingObjectId;
+    previousEditRef.current = { active: editingActive, objectId: editingObjectId };
+    if (!editingActive || (!activated && !switched)) return;
+    // Inspector 跟随 primary 刷新；只有它与编辑对象是同一个对象时，原文才可信。
+    if (inspector?.object_id !== editingObjectId) return;
+    setDraft(text?.unicode ?? '');
+  }, [editingActive, editingObjectId, inspector?.object_id, text?.unicode]);
   const rows: PropertyRow[] = text
     ? [
         { label: 'ObjectId', value: `#${inspector?.object_id ?? ''}`, mono: true },

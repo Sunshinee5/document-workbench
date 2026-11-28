@@ -67,6 +67,8 @@ export default function App() {
   const [focusedObject, setFocusedObject] = useState<ObjectNodeInfo | null>(null);
   const editor = useMemo(() => new EditorController(), []);
   const [editorState, setEditorState] = useState(() => editor.snapshot);
+  // 编辑事务初值：beginEdit 成功时锁定被编辑对象的原文，不随 Inspector 的 primary 刷新而变。
+  const [editingInitialText, setEditingInitialText] = useState('');
   const eventBridge = useMemo(() => new EventBridge(), []);
   const [feedback, setFeedback] = useState(() => eventBridge.snapshot);
   const ocr = useMemo(() => new OcrController(), []);
@@ -149,6 +151,7 @@ export default function App() {
     lastDocumentRef.current = current;
     setFocusedObject(null);
     setInspector(null);
+    setEditingInitialText('');
     setContextMenu(null);
     if (previous !== null && previous !== current) void editor.close(previous);
     if (current !== null) void editor.open(current);
@@ -317,14 +320,15 @@ export default function App() {
   /** 提交结果统一回写两个投影：EditorState（编辑态）与 ViewModel（壳层脏标记）。 */
   const acceptCommit = useCallback((info: CommitInfo | null) => {
     if (!info) {
-      push(ocr.snapshot.error || '提交失败', 'error');
+      // 失败原因来自 EditorController 的最后错误，而不是 OCR 会话的错误。
+      push(editor.snapshot.error || '提交失败：当前没有可提交的编辑事务', 'error');
       return;
     }
     editor.applySnapshot(info.snapshot);
     viewModel.applyEditorSnapshot(info.snapshot);
     pollFeedback();
-    push(`已提交编辑：v${info.before_version} → v${info.after_version}，改写 ${info.operators} 个 Operator`, 'success');
-  }, [editor, viewModel, ocr, pollFeedback, push]);
+    push(`已提交编辑（v${info.before_version} → v${info.after_version}），保存后页面可见`, 'success');
+  }, [editor, viewModel, pollFeedback, push]);
 
   /** OCR 启动：只把意图交给 Controller，完成/失败统一走 Toast。 */
   const startOcr = useCallback(async (pages: number[], region: [number, number, number, number] | null) => {
@@ -423,6 +427,8 @@ export default function App() {
         // 只有 Core 真正确认进入编辑态才切换模式，避免灰按钮/假编辑态。
         const editing = editor.snapshot.editing;
         if (editing.active && editing.objectId === primary) {
+          // 锁定编辑对象原文：编辑框草稿只认这一份初值，不随 Inspector 刷新而变。
+          setEditingInitialText(info?.text?.unicode ?? '');
           setModeState('edit');
           editor.setMode('edit');
         } else {
@@ -531,6 +537,8 @@ export default function App() {
       await editor.beginEdit(hit.object_id, info?.text?.unicode ?? '');
       const editing = editor.snapshot.editing;
       if (editing.active && editing.objectId === hit.object_id) {
+        // 锁定编辑对象原文：与 beginEdit 入口一致，避免 Inspector 刷新污染草稿。
+        setEditingInitialText(info?.text?.unicode ?? '');
         setModeState('edit');
         editor.setMode('edit');
       } else {
@@ -594,6 +602,7 @@ export default function App() {
       const objects: OverlayObject[] = page.objects.map((object) => ({
         objectId: object.object_id,
         bbox: object.bbox,
+        kind: object.kind,
       }));
       map[page.page] = {
         pageWidth: page.page_width,
@@ -772,7 +781,7 @@ export default function App() {
                 hoverObjectId={editorState.hover?.object_id ?? null}
                 selectedObjectIds={editorState.selection.selected}
                 editingObjectId={editorState.editing.objectId}
-                editingText={inspector?.text?.unicode ?? ''}
+                editingText={editingInitialText}
                 onCommitText={(text) => actions.replaceText(text)}
                 onCancelEdit={() => actions.cancel()}
                 hoverKind={editorState.hover?.kind_label ?? ''}
