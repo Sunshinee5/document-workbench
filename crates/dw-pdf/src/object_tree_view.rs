@@ -17,7 +17,8 @@ use crate::parser::PdfParser;
 /// 单个对象节点：Objects Workspace 的叶子，Inspector 的数据源。
 #[derive(Debug, Clone, Serialize)]
 pub struct ObjectNodeInfo {
-    /// 领域稳定标识。
+    /// 领域稳定标识（19 位 u64 跨 IPC 必须走字符串，否则 JS number 丢精度）。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub object_id: u64,
     /// 所属原始页码（1 起）。
     pub page: u32,
@@ -30,10 +31,12 @@ pub struct ObjectNodeInfo {
     /// 页内绘制层级。
     pub z_index: i32,
     /// lopdf xref 对象号。
+    #[serde(with = "dw_core::serde_util::option_u64_as_string")]
     pub stream_ref: Option<u64>,
     /// 生命周期中文文案。
     pub lifecycle: String,
     /// 对象版本号。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub version: u64,
     /// 文本对象的字体资源名。
     pub font_id: Option<String>,

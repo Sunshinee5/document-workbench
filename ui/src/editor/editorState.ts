@@ -34,13 +34,13 @@ export interface EditorState {
   page: number;
   zoom: number;
   selection: SelectionInfo;
-  editing: { active: boolean; objectId: number | null };
+  editing: { active: boolean; objectId: string | null };
   capability: CapabilityInfo;
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
   pendingPatches: number;
-  revision: number;
+  revision: string;
   /** Hover 对象：来自 hit_test，UI 不推算。 */
   hover: HitInfo | null;
   /** 最近一次错误（中文），供轻提示展示。 */
@@ -54,7 +54,7 @@ function emptyState(): EditorState {
     documentId: null,
     page: 1,
     zoom: 1,
-    selection: { page: null, primary: null, selected: [], version: 0 },
+    selection: { page: null, primary: null, selected: [], version: '0' },
     editing: { active: false, objectId: null },
     capability: {
       can_edit: false,
@@ -66,7 +66,7 @@ function emptyState(): EditorState {
     canRedo: false,
     dirty: false,
     pendingPatches: 0,
-    revision: 0,
+    revision: '0',
     hover: null,
     error: '',
   };
@@ -188,7 +188,7 @@ export class EditorController {
   /** 点击选择：multi 决定单选 / 多选策略。 */
   async select(
     page: number,
-    objectId: number,
+    objectId: string,
     options: { multi?: boolean; ctrl?: boolean; shift?: boolean } = {},
   ): Promise<void> {
     const documentId = this.stateValue.documentId;
@@ -239,7 +239,7 @@ export class EditorController {
   }
 
   /** 开始编辑（F2 / 双击）。 */
-  async beginEdit(objectId: number, text: string): Promise<void> {
+  async beginEdit(objectId: string, text: string): Promise<void> {
     const documentId = this.stateValue.documentId;
     if (documentId === null) {
       return;
@@ -283,7 +283,7 @@ export class EditorController {
   }
 
   /** Inspector 数据：只读。 */
-  async inspector(objectId: number): Promise<InspectorInfo | null> {
+  async inspector(objectId: string): Promise<InspectorInfo | null> {
     try {
       return await editorInspector(objectId);
     } catch {

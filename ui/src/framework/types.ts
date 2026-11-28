@@ -30,13 +30,13 @@ export interface FrameworkContext {
   zoomPercent: number;
   capability: CapabilityInfo;
   selection: SelectionInfo;
-  editing: { active: boolean; objectId: number | null };
+  editing: { active: boolean; objectId: string | null };
   hover: HitInfo | null;
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
   pendingPatches: number;
-  revision: number;
+  revision: string;
   parserText: string;
   saveText: string;
   taskEvent: string;
@@ -192,9 +192,9 @@ export interface OverlayRenderProps {
   pageHeight: number;
   rotation: number;
   objects: OverlayObject[];
-  hoverObjectId: number | null;
-  selectedObjectIds: number[];
-  editingObjectId: number | null;
+  hoverObjectId: string | null;
+  selectedObjectIds: string[];
+  editingObjectId: string | null;
   /** 18C：编辑对象当前文本（投影，草稿仍由 Inline Editor 本地持有）。 */
   editingText?: string;
   /** 18C：Inline Editor 提交（走 editor_commit）。 */
@@ -206,7 +206,7 @@ export interface OverlayRenderProps {
   /** 18C：Hover 对象种类中文名。 */
   hoverKind?: string;
   /** 18C：Primary 选中对象 id（单独高亮）。 */
-  primaryObjectId?: number | null;
+  primaryObjectId?: string | null;
   /** 第19章：OCR 结果投影（Overlay 画 BBox + confidence）。 */
   ocrResults?: Array<{
     /** 全局 OCR 结果序号（App 投影时写入），不是页内局部序号。 */
@@ -238,7 +238,8 @@ export interface OverlayRenderProps {
 
 /** 对象几何投影（不是 Object 真值）；由对象树 IPC 快照投影得到。 */
 export interface OverlayObject {
-  objectId: number;
+  /** u64 对象标识的字符串形式，与 hit/select/inspector 全线同类型。 */
+  objectId: string;
   bbox: [number, number, number, number];
 }
 

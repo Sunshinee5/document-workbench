@@ -22,6 +22,7 @@ use dw_ocr::session::{OCRCache, OCRSession};
 use dw_ocr::types::OCRSessionState;
 use dw_core::lifecycle::IExecutable;
 use dw_core::recovery::RecoveryStore;
+use dw_core::serde_util;
 use dw_core::session::{CommandRecord, SavePoint, Session, SessionManager, SessionState};
 use dw_core::task::TaskManager;
 use serde::Serialize;
@@ -1873,6 +1874,7 @@ pub struct OcrResultView {
     pub rotation: i32,
     pub provider: String,
     /// 源文本对象 id；None 表示图像 OCR 结果（当前不可 Apply）。
+    #[serde(with = "serde_util::option_u64_as_string")]
     pub source_object_id: Option<u64>,
 }
 

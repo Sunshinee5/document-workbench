@@ -246,7 +246,8 @@ export async function canRedo(): Promise<boolean> {
 
 /** 对象节点：Objects Workspace 的叶子，Inspector 的数据源（规范 16 C-8，只读）。 */
 export interface ObjectNodeInfo {
-  object_id: number;
+  /** u64 对象标识：跨 IPC 以十进制字符串传输，避免 JS number 丢精度。 */
+  object_id: string;
   page: number;
   /** 对象种类英文枚举名（Text / Image / Path / Unknown 等）。 */
   kind: string;
@@ -255,9 +256,9 @@ export interface ObjectNodeInfo {
   /** PDF 坐标边界 [x, y, width, height]，原点左下。 */
   bbox: [number, number, number, number];
   z_index: number;
-  stream_ref: number | null;
+  stream_ref: string | null;
   lifecycle: string;
-  version: number;
+  version: string;
   font_id: string | null;
   font_size: number | null;
   unicode: string | null;
@@ -342,7 +343,8 @@ export async function pickSavePath(defaultPath?: string): Promise<string | null>
 /** 命中结果：Hover / Selection 的几何来源。 */
 export interface HitInfo {
   page: number;
-  object_id: number;
+  /** u64 对象标识：十进制字符串，禁止当 number 比较或再传给后端。 */
+  object_id: string;
   kind: string;
   kind_label: string;
   bbox: [number, number, number, number];
@@ -351,15 +353,15 @@ export interface HitInfo {
 /** 选择投影（真值在 Session.selection_state）。 */
 export interface SelectionInfo {
   page: number | null;
-  primary: number | null;
-  selected: number[];
-  version: number;
+  primary: string | null;
+  selected: string[];
+  version: string;
 }
 
 /** 编辑事务投影（真值在 EditingEngine）。 */
 export interface EditingInfo {
   active: boolean;
-  object_id: number | null;
+  object_id: string | null;
 }
 
 /** 能力投影：Ribbon 只按它决定按钮亮/灰。 */
@@ -382,15 +384,16 @@ export interface EditorSnapshot {
   can_redo: boolean;
   dirty: boolean;
   pending_patches: number;
-  revision: number;
+  /** u64 快照修订号：字符串，仅用于判断变化与展示。 */
+  revision: string;
 }
 
 /** 提交结果。 */
 export interface CommitInfo {
-  object_id: number;
+  object_id: string;
   page: number;
-  before_version: number;
-  after_version: number;
+  before_version: string;
+  after_version: string;
   operators: number;
   snapshot: EditorSnapshot;
 }
@@ -409,7 +412,7 @@ export interface ImageInspector {
   pixel_width: number;
   pixel_height: number;
   colorspace: string;
-  xref: number;
+  xref: string;
   resolution_dpi: number | null;
   compression: string | null;
 }
@@ -424,14 +427,14 @@ export interface PathInspector {
 
 /** Inspector 数据。 */
 export interface InspectorInfo {
-  object_id: number;
+  object_id: string;
   page: number;
   kind: string;
   kind_label: string;
   bbox: [number, number, number, number];
   z_index: number;
   lifecycle: string;
-  version: number;
+  version: string;
   text: TextInspector | null;
   image: ImageInspector | null;
   path: PathInspector | null;
@@ -475,7 +478,7 @@ export async function editorHitTest(
 export async function editorSelect(
   documentId: number,
   page: number,
-  objectId: number,
+  objectId: string,
   multi: boolean,
   ctrl: boolean,
   shift: boolean,
@@ -509,7 +512,7 @@ export async function editorSelectAll(
 /** 开始编辑。 */
 export async function editorBeginEdit(
   documentId: number,
-  objectId: number,
+  objectId: string,
   text: string,
 ): Promise<EditorSnapshot> {
   return invoke<EditorSnapshot>('editor_begin_edit', { documentId, objectId, text });
@@ -526,7 +529,7 @@ export async function editorCancel(documentId: number): Promise<EditorSnapshot> 
 }
 
 /** Inspector 数据。 */
-export async function editorInspector(objectId: number): Promise<InspectorInfo | null> {
+export async function editorInspector(objectId: string): Promise<InspectorInfo | null> {
   return invoke<InspectorInfo | null>('editor_inspector', { objectId });
 }
 
@@ -586,7 +589,8 @@ export interface OcrResultInfo {
   text: string;
   rotation: number;
   provider: string;
-  source_object_id: number | null;
+  /** 源对象 u64 标识：字符串，仅判空与展示，Apply 由后端按 resultIndex 定位。 */
+  source_object_id: string | null;
 }
 
 /** OCR Review 记录。 */

@@ -55,15 +55,15 @@ export interface PageOverlaysProps {
   pageHeight: number;
   rotation: number;
   objects: OverlayObject[];
-  hoverObjectId: number | null;
-  selectedObjectIds: number[];
-  editingObjectId: number | null;
+  hoverObjectId: string | null;
+  selectedObjectIds: string[];
+  editingObjectId: string | null;
   editingText?: string;
   onCommitText?: (text: string) => void;
   onCancelEdit?: () => void;
   hoverKind?: string;
   hoverPriority?: string;
-  primaryObjectId?: number | null;
+  primaryObjectId?: string | null;
   /** 第19章：当前页 OCR 结果投影（只读，来自 OcrController）。 */
   ocrResults?: OverlayRenderProps['ocrResults'];
   /** 18 章：当前工具 id（手柄 Hover 光标策略）。 */

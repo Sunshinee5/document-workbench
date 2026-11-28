@@ -88,11 +88,11 @@ function framedObjectIds(
   pageData: PageOverlayData | undefined,
   rotation: number,
   rect: FrameRect,
-): number[] {
+): string[] {
   if (!pageData) {
     return [];
   }
-  const ids: number[] = [];
+  const ids: string[] = [];
   for (const object of pageData.objects) {
     const box = projectBox(object.bbox, pageData.pageWidth, pageData.pageHeight, rotation);
     const intersects =
@@ -166,12 +166,12 @@ interface PdfViewerProps {
   onSelectPage: (page: number, mode: 'replace' | 'toggle' | 'range') => void;
   /** 逐页 Overlay 数据（键为原始页码）；为空时不画对象框。 */
   overlayPages?: Record<number, PageOverlayData>;
-  /** Hover 对象 id（来自 hit_test 投影）。 */
-  hoverObjectId?: number | null;
+  /** Hover 对象 id（来自 hit_test 投影，u64 字符串）。 */
+  hoverObjectId?: string | null;
   /** 选中对象 id 列表（Selection 真值在 Session）。 */
-  selectedObjectIds?: number[];
+  selectedObjectIds?: string[];
   /** 正在编辑的对象 id：显示 Caret。 */
-  editingObjectId?: number | null;
+  editingObjectId?: string | null;
   /** 18C：编辑对象当前文本（Inline Editor 预填）。 */
   editingText?: string;
   /** 18C：Inline Editor 提交。 */
@@ -181,14 +181,14 @@ interface PdfViewerProps {
   /** 18C：Hover 对象种类与优先级（命中反馈）。 */
   hoverKind?: string;
   hoverPriority?: string;
-  /** 18C：Primary 选中对象 id。 */
-  primaryObjectId?: number | null;
+  /** 18C：Primary 选中对象 id（u64 字符串）。 */
+  primaryObjectId?: string | null;
   /** 光标种类：唯一来源是 CursorManager.resolve(toolId)，组件不得自行设置。 */
   cursorKind?: string;
   /** 18 章：当前工具 id，交给 Overlay 手柄决定 Hover 光标。 */
   toolMode?: string;
   /** 18 章：框选结束；objectIds 为空表示空框选，由 App 清选择。 */
-  onFrameSelect?: (page: number, objectIds: number[]) => void;
+  onFrameSelect?: (page: number, objectIds: string[]) => void;
   /** 18 章：Inline Editor 失焦轻提示，交给 App 唯一 ToastStack。 */
   onNotify?: (text: string) => void;
   /** 第19章：OCR Review 决策只读投影。 */

@@ -51,7 +51,8 @@ fn service_error(message: impl Into<String>) -> DriverError {
 pub struct HitInfo {
     /// 页码（1 起）。
     pub page: u32,
-    /// 对象标识。
+    /// 对象标识（19 位 u64 跨 IPC 必须走字符串，否则 JS number 丢精度）。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub object_id: u64,
     /// 种类英文名（Text / Image / Path / Unknown …）。
     pub kind: String,
@@ -67,10 +68,13 @@ pub struct SelectionInfo {
     /// 选择所在页；无选择为 `None`。
     pub page: Option<u32>,
     /// 主选对象。
+    #[serde(with = "dw_core::serde_util::option_u64_as_string")]
     pub primary: Option<u64>,
     /// 全部选中对象。
+    #[serde(with = "dw_core::serde_util::vec_u64_as_string")]
     pub selected: Vec<u64>,
     /// 选择版本号（用于 UI 判断是否需要重画）。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub version: u64,
 }
 
@@ -80,6 +84,7 @@ pub struct EditingInfo {
     /// 是否有进行中的编辑事务。
     pub active: bool,
     /// 正在编辑的对象。
+    #[serde(with = "dw_core::serde_util::option_u64_as_string")]
     pub object_id: Option<u64>,
 }
 
@@ -120,6 +125,7 @@ pub struct EditorSnapshot {
     /// 待保存补丁数。
     pub pending_patches: usize,
     /// 快照修订号：变化即 UI 重绘。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub revision: u64,
 }
 
@@ -127,12 +133,15 @@ pub struct EditorSnapshot {
 #[derive(Debug, Clone, Serialize)]
 pub struct CommitInfo {
     /// 提交后的对象标识。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub object_id: u64,
     /// 所在页。
     pub page: u32,
     /// 提交前版本。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub before_version: u64,
     /// 提交后版本。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub after_version: u64,
     /// 本次改写的 Operator 数量。
     pub operators: usize,
@@ -164,7 +173,8 @@ pub struct ImageInspector {
     pub pixel_height: u32,
     /// 色彩空间名。
     pub colorspace: String,
-    /// 图片 xref。
+    /// 图片 xref（原始 PDF 对象号，跨 IPC 走字符串）。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub xref: u64,
     /// 由 bbox 与像素尺寸推算的 DPI；尺寸非法时为 `None`。
     pub resolution_dpi: Option<f64>,
@@ -189,6 +199,7 @@ pub struct PathInspector {
 #[derive(Debug, Clone, Serialize)]
 pub struct InspectorInfo {
     /// 对象标识。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub object_id: u64,
     /// 页码。
     pub page: u32,
@@ -203,6 +214,7 @@ pub struct InspectorInfo {
     /// 生命周期中文名。
     pub lifecycle: String,
     /// 对象版本号。
+    #[serde(with = "dw_core::serde_util::u64_as_string")]
     pub version: u64,
     /// 文本分区；非文本为 `None`。
     pub text: Option<TextInspector>,

@@ -24,6 +24,8 @@ pub mod object;
 pub mod object_tree;
 pub mod page;
 pub mod recovery;
+/// IPC 边界 u64 字符串化：只在序列化边界防精度丢失，不改 Core 内部 u64 语义。
+pub mod serde_util;
 pub mod selection;
 pub mod session;
 pub mod task;

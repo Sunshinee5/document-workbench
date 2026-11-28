@@ -15,8 +15,8 @@ export interface ObjectsPanelProps {
   loading: boolean;
   /** 解析失败原因。 */
   error: string;
-  /** 当前聚焦对象（UI 聚焦，不是 Selection 真值）。 */
-  focusedObjectId: number | null;
+  /** 当前聚焦对象（UI 聚焦，不是 Selection 真值）；u64 对象标识的字符串形式。 */
+  focusedObjectId: string | null;
   /** 展开集合。 */
   expanded: string[];
   /** 展开 / 折叠节点。 */
@@ -95,7 +95,8 @@ export function ObjectsPanel({
       }
       return;
     }
-    const objectId = Number(objectText);
+    // 对象标识是 u64 字符串：保持 string 比较，禁止 Number() 造成精度丢失。
+    const objectId = objectText ?? '';
     const object =
       tree?.pages
         .flatMap((item) => item.objects)
@@ -112,7 +113,8 @@ export function ObjectsPanel({
       onFocusObject(null);
       return;
     }
-    const objectId = Number(node.id.split(':')[2]);
+    // 同上：节点 id 中的对象号原样取字符串，不解析成 number。
+    const objectId = node.id.split(':')[2] ?? '';
     const object =
       tree?.pages
         .flatMap((item) => item.objects)

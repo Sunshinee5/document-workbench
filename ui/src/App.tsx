@@ -544,7 +544,7 @@ export default function App() {
    * 先选最后一个再倒序追加，使 Core 的「primary = 最后命中」最终落在框选第一个对象。
    * 只在全部完成后 pollFeedback 一次，避免滚动 / 命令事件反复拉取。
    */
-  const handleFrameSelect = useCallback((page: number, objectIds: number[]) => {
+  const handleFrameSelect = useCallback((page: number, objectIds: string[]) => {
     void (async () => {
       await editor.clearSelection(page);
       if (objectIds.length === 0) {
